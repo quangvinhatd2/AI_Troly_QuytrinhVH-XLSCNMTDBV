@@ -1,0 +1,11 @@
+chromadb
+flask
+python-dotenv
+google-generativeai
+sentence-transformers
+langchain
+langchain-community
+pypdf
+pdfplumber
+gunicorn
+psycopg2-binary

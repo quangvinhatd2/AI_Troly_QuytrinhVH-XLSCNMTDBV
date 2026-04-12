@@ -1,0 +1,8 @@
+chroma_db_gemini/
+pdfs/
+__pycache__/
+*.pyc
+.env
+*.db
+*.sqlite3
+venv/
