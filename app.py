@@ -7,7 +7,11 @@ from psycopg2.extras import RealDictCursor
 from datetime import datetime
 from flask import Flask, render_template, request, jsonify
 from dotenv import load_dotenv
-import google.generativeai as genai
+
+# ✅ SỬA 1: Dùng google.genai thay vì google.generativeai (deprecated)
+from google import genai
+from google.genai import types
+
 from sentence_transformers import SentenceTransformer
 from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
 
@@ -16,28 +20,40 @@ load_dotenv()
 # --- CẤU HÌNH ---
 API_KEY = os.getenv("GEMINI_API_KEY")
 PERSIST_DIR = "./chroma_db_gemini"
-DATABASE_URL = os.getenv("DATABASE_URL")  # PostgreSQL URL từ Neon
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 if not API_KEY:
     raise ValueError("❌ Thiếu GEMINI_API_KEY trong file .env")
 if not DATABASE_URL:
     raise ValueError("❌ Thiếu DATABASE_URL (PostgreSQL) trong file .env")
 
-# Embedding function
+# ✅ SỬA 2: Lazy load SentenceTransformer — KHÔNG load ngay khi import
+# Load model lần đầu khi có request, tránh timeout lúc deploy
+_embed_model = None
+
+def get_embed_model():
+    global _embed_model
+    if _embed_model is None:
+        print("⏳ Đang load SentenceTransformer lần đầu...")
+        _embed_model = SentenceTransformer("dangvantuan/vietnamese-embedding")
+        _embed_model.max_seq_length = 256
+        print("✅ SentenceTransformer đã sẵn sàng.")
+    return _embed_model
+
 class VietnameseEmbeddingFunction(EmbeddingFunction):
-    def __init__(self):
-        self.model = SentenceTransformer("dangvantuan/vietnamese-embedding")
-        self.model.max_seq_length = 256
     def __call__(self, input: Documents) -> Embeddings:
-        return self.model.encode(input, convert_to_numpy=True).tolist()
+        model = get_embed_model()
+        return model.encode(input, convert_to_numpy=True).tolist()
 
 embed_fn = VietnameseEmbeddingFunction()
+
+# ✅ SỬA 1 (tiếp): Khởi tạo client với google.genai
 client = genai.Client(api_key=API_KEY)
 
 # Tìm model Gemini
 available_models = [m.name for m in client.models.list()]
 MODEL_NAME = None
-for candidate in ["gemini-1.5-flash", "models/gemini-1.5-flash", "gemini-2.0-flash"]:
+for candidate in ["gemini-2.0-flash", "models/gemini-2.0-flash", "gemini-1.5-flash", "models/gemini-1.5-flash"]:
     if candidate in available_models:
         MODEL_NAME = candidate
         break
@@ -90,7 +106,6 @@ def save_question_answer(question, answer, collection_name):
     conn.commit()
     conn.close()
 
-# Khởi tạo bảng
 init_history_db()
 
 # ==================== TRÍCH DẪN NOTEBOOKLM ====================
@@ -98,11 +113,11 @@ def retrieve_with_metadata(question: str, collection_name: str, k=30):
     try:
         col = pdf_collections[collection_name]["collection"]
         results = col.query(query_texts=[question], n_results=k)
-        
+
         documents = results['documents'][0]
         metadatas = results['metadatas'][0]
         distances = results['distances'][0] if 'distances' in results else [1.0] * len(documents)
-        
+
         chunks_with_meta = []
         for i, (doc, meta, dist) in enumerate(zip(documents, metadatas, distances)):
             keyword_score = 0
@@ -111,7 +126,6 @@ def retrieve_with_metadata(question: str, collection_name: str, k=30):
                 if word in doc.lower():
                     keyword_score += 0.1
             relevance = (1 - dist) + keyword_score
-            
             chunks_with_meta.append({
                 "content": doc,
                 "source": meta.get("source", "Không rõ nguồn"),
@@ -148,7 +162,6 @@ def ask_gemini_notebooklm(question: str, collection_name: str, response_level=3)
     print(f"🔍 Số chunk lấy được: {len(chunks)}")
     print(f"🔍 Độ dài context: {len(context)} ký tự")
 
-    # Phân loại câu hỏi
     question_lower = question.lower()
     if any(word in question_lower for word in ["trình tự", "các bước", "làm thế nào", "cách thức"]):
         q_type = "quy trình"
@@ -195,6 +208,7 @@ Bạn là chuyên gia phân tích tài liệu quy trình vận hành thủy đi�
     max_retries = 3
     for attempt in range(max_retries):
         try:
+            # ✅ SỬA 1 (tiếp): Dùng API mới của google.genai
             response = client.models.generate_content(
                 model=MODEL_NAME,
                 contents=prompt_content
@@ -229,7 +243,6 @@ def ask():
         if not data or "question" not in data or "collection_name" not in data:
             return jsonify({"answer": "Thiếu câu hỏi hoặc tên quy trình"})
         answer = ask_gemini_notebooklm(data["question"], data["collection_name"])
-        # Lưu lịch sử vào PostgreSQL
         save_question_answer(data["question"], answer, data["collection_name"])
         return jsonify({"answer": answer})
     except Exception as e:
@@ -277,5 +290,7 @@ def history_html():
     html += "</body></html>"
     return html
 
+# ✅ SỬA 3: Không cần chỉ định port ở đây — Gunicorn sẽ xử lý qua Start Command
 if __name__ == "__main__":
-    app.run(debug=False, host="0.0.0.0", port=5000)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(debug=False, host="0.0.0.0", port=port)
