@@ -7,7 +7,7 @@ from psycopg2.extras import RealDictCursor
 from datetime import datetime
 from flask import Flask, render_template, request, jsonify
 from dotenv import load_dotenv
-from google import genai
+import google.generativeai as genai
 from sentence_transformers import SentenceTransformer
 from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
 
