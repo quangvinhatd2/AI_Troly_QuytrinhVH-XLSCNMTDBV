@@ -5,101 +5,113 @@
   <title>Admin Dashboard</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: Arial, sans-serif; background: #f0f2f5; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; background: #f0f2f5; }
     header { background: #1a73e8; color: white; padding: 16px 32px;
              display: flex; justify-content: space-between; align-items: center; }
     header h1 { font-size: 20px; }
+    header .nav-links { display: flex; gap: 15px; align-items: center; }
     header a { color: white; text-decoration: none; font-size: 14px;
                background: rgba(255,255,255,.2); padding: 6px 14px; border-radius: 6px; }
     header a:hover { background: rgba(255,255,255,.35); }
+    
     .container { max-width: 1100px; margin: 32px auto; padding: 0 24px; }
     .flash { background: #e6f4ea; color: #137333; padding: 12px 16px;
-             border-radius: 8px; margin-bottom: 24px; font-size: 14px; }
-    .flash.error { background: #fce8e6; color: #c5221f; }
+             border-radius: 8px; margin-bottom: 24px; font-size: 14px; border-left: 4px solid #34a853; }
+    
     section { background: white; border-radius: 12px; padding: 24px;
               box-shadow: 0 1px 4px rgba(0,0,0,.08); margin-bottom: 28px; }
     section h2 { font-size: 17px; color: #333; margin-bottom: 16px;
-                 padding-bottom: 10px; border-bottom: 1px solid #eee; }
+                  padding-bottom: 10px; border-bottom: 1px solid #eee; }
+    
     .btn { display: inline-block; padding: 9px 20px; border-radius: 6px;
-           font-size: 14px; cursor: pointer; border: none; text-decoration: none; }
+           font-size: 14px; cursor: pointer; border: none; text-decoration: none; font-weight: 500; }
     .btn-primary { background: #1a73e8; color: white; }
     .btn-primary:hover { background: #1558b0; }
     .btn-danger  { background: #d93025; color: white; }
     .btn-danger:hover  { background: #a50e0e; }
-    .btn-outline { background: white; color: #555; border: 1px solid #ddd; }
-    .btn-outline:hover { background: #f5f5f5; }
+    .btn-outline { background: white; color: #555; border: 1px solid #ddd; padding: 5px 10px; }
+    .btn-outline:hover { background: #fce8e6; color: #d93025; border-color: #fce8e6; }
+    
     .pdf-list { display: flex; flex-wrap: wrap; gap: 10px; }
     .pdf-tag { background: #e8f0fe; color: #1a73e8; padding: 6px 14px;
-               border-radius: 20px; font-size: 13px; }
-    table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    th { text-align: left; padding: 10px 12px; background: #f8f9fa;
+               border-radius: 20px; font-size: 13px; font-weight: 500; border: 1px solid #c2d7ff; }
+    
+    table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 10px; }
+    th { text-align: left; padding: 12px; background: #f8f9fa;
          color: #555; font-weight: 600; border-bottom: 2px solid #eee; }
-    td { padding: 10px 12px; border-bottom: 1px solid #f0f0f0; vertical-align: top; }
+    td { padding: 12px; border-bottom: 1px solid #f0f0f0; vertical-align: top; }
     tr:hover td { background: #fafafa; }
-    .q { color: #1a73e8; font-weight: 600; }
-    .meta { color: #999; font-size: 12px; margin-top: 4px; }
-    .answer-preview { color: #444; max-width: 420px;
-                      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    
+    .q { color: #1a73e8; font-weight: 600; margin-bottom: 4px; line-height: 1.4; }
+    .meta { color: #777; font-size: 11px; margin-top: 4px; font-family: monospace; }
+    .answer-preview { color: #444; max-width: 400px; line-height: 1.5;
+                      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; 
+                      overflow: hidden; text-overflow: ellipsis; white-space: normal; }
     .actions-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
   </style>
 </head>
 <body>
   <header>
-    <h1>⚙️ Admin Dashboard</h1>
-    <a href="{{ url_for('admin_logout') }}">Đăng xuất</a>
+    <h1>⚙️ Hệ thống Quản trị - HPCBANVE</h1>
+    <div class="nav-links">
+      <a href="{{ url_for('home') }}">🏠 Trang chủ</a>
+      <a href="{{ url_for('admin_logout') }}" style="background: #d93025;">Đăng xuất</a>
+    </div>
   </header>
 
   <div class="container">
     {% with messages = get_flashed_messages() %}
       {% if messages %}
-        <div class="flash">{{ messages[0] }}</div>
+        {% for message in messages %}
+          <div class="flash">{{ message }}</div>
+        {% endfor %}
       {% endif %}
     {% endwith %}
 
-    <!-- Danh sách tài liệu -->
     <section>
-      <h2>📚 Danh sách tài liệu ({{ pdf_list|length }} quy trình)</h2>
+      <h2>📚 Danh sách quy trình đang hoạt động ({{ pdf_list|length }})</h2>
       {% if pdf_list %}
         <div class="pdf-list">
           {% for pdf in pdf_list %}
-            <span class="pdf-tag">{{ pdf.name }}</span>
+            <span class="pdf-tag">📄 {{ pdf.name }}</span>
           {% endfor %}
         </div>
       {% else %}
-        <p style="color:#999">Chưa có tài liệu nào. Hãy chạy build_db.py trên máy local.</p>
+        <p style="color:#999 italic">Hệ thống chưa nhận diện được bộ chỉ mục (Collection). Admin vui lòng kiểm tra thư mục chroma_db.</p>
       {% endif %}
-      <div style="margin-top:16px">
-        <form method="POST" action="{{ url_for('admin_refresh') }}" style="display:inline">
-          <button class="btn btn-primary" type="submit">🔄 Refresh danh sách</button>
+      
+      <div style="margin-top:20px; padding-top:15px; border-top: 1px dashed #eee;">
+        <form method="POST" action="{{ url_for('admin_refresh') }}">
+          <button class="btn btn-primary" type="submit">🔄 Làm mới danh sách quy trình</button>
+          <p style="font-size: 11px; color: #777; margin-top: 8px;">*Nhấn để cập nhật lại dữ liệu nếu bạn vừa thêm file PDF mới vào hệ thống.</p>
         </form>
       </div>
     </section>
 
-    <!-- Lịch sử hỏi đáp -->
     <section>
-      <h2>📜 Lịch sử hỏi đáp (50 gần nhất)</h2>
-      <div class="actions-row" style="margin-bottom:16px">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <h2>📜 Lịch sử hỏi đáp (Tối đa 50 bản ghi)</h2>
         <form method="POST" action="{{ url_for('admin_delete_history_all') }}"
-              onsubmit="return confirm('Xóa toàn bộ lịch sử?')">
-          <button class="btn btn-danger" type="submit">🗑 Xóa tất cả</button>
+              onsubmit="return confirm('CẢNH BÁO: Hành động này sẽ xóa vĩnh viễn toàn bộ lịch sử hỏi đáp. Bạn chắc chắn muốn tiếp tục?')">
+          <button class="btn btn-danger" type="submit">🗑 Xóa sạch lịch sử</button>
         </form>
       </div>
+
       {% if history %}
       <table>
         <thead>
           <tr>
-            <th>#</th>
-            <th>Câu hỏi</th>
-            <th>Câu trả lời</th>
-            <th>Thời gian</th>
-            <th>Tài liệu</th>
-            <th></th>
+            <th style="width: 50px;">ID</th>
+            <th style="width: 30%;">Câu hỏi</th>
+            <th style="width: 40%;">Nội dung trả lời (Trích đoạn)</th>
+            <th>Thông tin bổ sung</th>
+            <th style="width: 60px; text-align: center;">Thao tác</th>
           </tr>
         </thead>
         <tbody>
           {% for row in history %}
           <tr>
-            <td>{{ row.id }}</td>
+            <td><span style="color:#999">#{{ row.id }}</span></td>
             <td>
               <div class="q">{{ row.question }}</div>
             </td>
@@ -107,14 +119,14 @@
               <div class="answer-preview">{{ row.answer | striptags }}</div>
             </td>
             <td>
-              <div class="meta">{{ row.timestamp[:16].replace('T',' ') }}</div>
+              <div class="meta">📅 {{ row.timestamp[:16].replace('T',' ') }}</div>
+              <div class="meta" style="color:#1a73e8">📂 {{ row.collection_name }}</div>
             </td>
-            <td><div class="meta">{{ row.collection_name }}</div></td>
-            <td>
+            <td style="text-align: center;">
               <form method="POST"
                     action="{{ url_for('admin_delete_history', history_id=row.id) }}"
-                    onsubmit="return confirm('Xóa bản ghi này?')">
-                <button class="btn btn-outline" type="submit">🗑</button>
+                    onsubmit="return confirm('Xóa câu hỏi này khỏi lịch sử?')">
+                <button class="btn btn-outline" type="submit" title="Xóa bản ghi">🗑</button>
               </form>
             </td>
           </tr>
@@ -122,7 +134,9 @@
         </tbody>
       </table>
       {% else %}
-        <p style="color:#999">Chưa có lịch sử nào.</p>
+      <div style="text-align: center; padding: 40px; color: #999;">
+        <p>Chưa có dữ liệu lịch sử hỏi đáp nào được ghi nhận.</p>
+      </div>
       {% endif %}
     </section>
   </div>
