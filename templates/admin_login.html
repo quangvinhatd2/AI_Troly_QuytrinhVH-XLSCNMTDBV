@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <title>Admin Login</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: Arial, sans-serif; background: #f0f2f5;
+           display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+    .card { background: white; padding: 40px; border-radius: 12px;
+            box-shadow: 0 2px 12px rgba(0,0,0,.1); width: 360px; }
+    h2 { color: #1a73e8; margin-bottom: 24px; text-align: center; }
+    .flash { background: #fce8e6; color: #c5221f; padding: 10px 14px;
+             border-radius: 6px; margin-bottom: 16px; font-size: 14px; }
+    label { display: block; font-size: 13px; color: #555; margin-bottom: 6px; }
+    input[type=password] { width: 100%; padding: 10px 14px; border: 1px solid #ddd;
+                           border-radius: 6px; font-size: 15px; outline: none; }
+    input[type=password]:focus { border-color: #1a73e8; }
+    button { width: 100%; margin-top: 20px; padding: 12px;
+             background: #1a73e8; color: white; border: none;
+             border-radius: 6px; font-size: 15px; cursor: pointer; }
+    button:hover { background: #1558b0; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>🔐 Admin Login</h2>
+    {% with messages = get_flashed_messages() %}
+      {% if messages %}
+        <div class="flash">{{ messages[0] }}</div>
+      {% endif %}
+    {% endwith %}
+    <form method="POST">
+      <label>Mật khẩu admin</label>
+      <input type="password" name="password" autofocus placeholder="Nhập mật khẩu...">
+      <button type="submit">Đăng nhập</button>
+    </form>
+  </div>
+</body>
+</html>

@@ -4,14 +4,19 @@ import time
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from datetime import datetime
-from flask import Flask, render_template, request, jsonify
+from functools import wraps
+from flask import (Flask, render_template, request, jsonify,
+                   redirect, url_for, session, flash, send_from_directory)
 from dotenv import load_dotenv
 
 load_dotenv()
 
-API_KEY = os.getenv("GEMINI_API_KEY")
-PERSIST_DIR = "./chroma_db_gemini"
-DATABASE_URL = os.getenv("DATABASE_URL")
+API_KEY        = os.getenv("GEMINI_API_KEY")
+DATABASE_URL   = os.getenv("DATABASE_URL")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123")
+SECRET_KEY     = os.getenv("SECRET_KEY", "change-me-please")
+PERSIST_DIR    = "./chroma_db_gemini"
+PDF_DIR        = "./pdfs"
 
 if not API_KEY:
     raise ValueError("❌ Thiếu GEMINI_API_KEY")
@@ -19,15 +24,17 @@ if not DATABASE_URL:
     raise ValueError("❌ Thiếu DATABASE_URL")
 
 app = Flask(__name__)
+app.secret_key = SECRET_KEY
 
 # =============================================================
-# ✅ LAZY GLOBALS — không có gì nặng chạy lúc import
+# LAZY GLOBALS
 # =============================================================
-_genai_client = None
-_model_name   = None
-_embed_fn     = None
-_chroma_client = None
-_pdf_collections = None   # None = chưa load, {} = đã load nhưng rỗng
+_genai_client    = None
+_model_name      = None
+_embed_fn        = None
+_chroma_client   = None
+_pdf_collections = None
+
 
 def get_genai_client():
     global _genai_client, _model_name
@@ -44,6 +51,7 @@ def get_genai_client():
             _model_name = available[0]
         print(f"✅ Gemini client sẵn sàng, model: {_model_name}")
     return _genai_client
+
 
 def get_embed_fn():
     global _embed_fn
@@ -62,9 +70,10 @@ def get_embed_fn():
         print("✅ SentenceTransformer sẵn sàng.")
     return _embed_fn
 
-def get_chroma_collections():
+
+def get_pdf_collections(force_refresh: bool = False):
     global _chroma_client, _pdf_collections
-    if _pdf_collections is None:
+    if _pdf_collections is None or force_refresh:
         import chromadb
         _chroma_client = chromadb.PersistentClient(path=PERSIST_DIR)
         embed_fn = get_embed_fn()
@@ -82,16 +91,118 @@ def get_chroma_collections():
                         name=col.name, embedding_function=embed_fn
                     )
                     _pdf_collections[col.name] = {
-                        "name": display_name,
-                        "collection": collection_obj
+                        "name":       display_name,
+                        "collection": collection_obj,
                     }
             print(f"✅ Đã load {len(_pdf_collections)} quy trình.")
         except Exception as e:
             print(f"⚠️ Lỗi load ChromaDB: {e}")
+            _pdf_collections = {}
     return _pdf_collections
 
+
+def get_pdf_files():
+    """Lấy danh sách file PDF trong thư mục pdfs/ kèm kích thước."""
+    if not os.path.exists(PDF_DIR):
+        return []
+    files = []
+    for f in sorted(os.listdir(PDF_DIR)):
+        if f.lower().endswith(".pdf"):
+            size = os.path.getsize(os.path.join(PDF_DIR, f))
+            files.append({
+                "name": f,
+                "size": f"{size / 1024 / 1024:.1f} MB" if size > 1024*1024
+                        else f"{size // 1024} KB"
+            })
+    return files
+
+
 # =============================================================
-# DATABASE
+# ADMIN AUTH
+# =============================================================
+def admin_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not session.get("is_admin"):
+            return redirect(url_for("admin_login"))
+        return f(*args, **kwargs)
+    return decorated
+
+
+@app.route("/admin/login", methods=["GET", "POST"])
+def admin_login():
+    if request.method == "POST":
+        if request.form.get("password") == ADMIN_PASSWORD:
+            session["is_admin"] = True
+            return redirect(url_for("admin_dashboard"))
+        flash("❌ Sai mật khẩu!")
+    return render_template("admin_login.html")
+
+
+@app.route("/admin/logout")
+def admin_logout():
+    session.clear()
+    return redirect(url_for("admin_login"))
+
+
+# =============================================================
+# ADMIN DASHBOARD
+# =============================================================
+@app.route("/admin")
+@admin_required
+def admin_dashboard():
+    pdf_collections = get_pdf_collections()
+    conn = psycopg2.connect(DATABASE_URL)
+    c = conn.cursor(cursor_factory=RealDictCursor)
+    c.execute("SELECT id, question, answer, timestamp, collection_name "
+              "FROM history ORDER BY timestamp DESC LIMIT 50")
+    history = c.fetchall()
+    conn.close()
+    return render_template("admin.html",
+                           pdf_list=list(pdf_collections.values()),
+                           history=history)
+
+
+@app.route("/admin/refresh", methods=["POST"])
+@admin_required
+def admin_refresh():
+    get_pdf_collections(force_refresh=True)
+    flash("✅ Đã refresh danh sách tài liệu!")
+    return redirect(url_for("admin_dashboard"))
+
+
+@app.route("/admin/delete_history/<int:history_id>", methods=["POST"])
+@admin_required
+def admin_delete_history(history_id):
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        c = conn.cursor()
+        c.execute("DELETE FROM history WHERE id = %s", (history_id,))
+        conn.commit()
+        conn.close()
+        flash("✅ Đã xóa bản ghi!")
+    except Exception as e:
+        flash(f"❌ Lỗi xóa: {e}")
+    return redirect(url_for("admin_dashboard"))
+
+
+@app.route("/admin/delete_history_all", methods=["POST"])
+@admin_required
+def admin_delete_history_all():
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        c = conn.cursor()
+        c.execute("DELETE FROM history")
+        conn.commit()
+        conn.close()
+        flash("✅ Đã xóa toàn bộ lịch sử!")
+    except Exception as e:
+        flash(f"❌ Lỗi xóa: {e}")
+    return redirect(url_for("admin_dashboard"))
+
+
+# =============================================================
+# DATABASE POSTGRES
 # =============================================================
 def init_history_db():
     conn = psycopg2.connect(DATABASE_URL)
@@ -106,51 +217,57 @@ def init_history_db():
     conn.commit()
     conn.close()
 
+
 def save_question_answer(question, answer, collection_name):
     try:
         conn = psycopg2.connect(DATABASE_URL)
         c = conn.cursor()
         c.execute(
-            "INSERT INTO history (question, answer, timestamp, collection_name) VALUES (%s,%s,%s,%s)",
-            (question, answer, datetime.now().isoformat(), collection_name)
+            "INSERT INTO history (question, answer, timestamp, collection_name) "
+            "VALUES (%s, %s, %s, %s)",
+            (question, answer, datetime.now().isoformat(), collection_name),
         )
         conn.commit()
         conn.close()
     except Exception as e:
         print(f"⚠️ Lỗi lưu history: {e}")
 
-# Khởi tạo bảng ngay (chỉ là SQL nhẹ, không block)
+
 try:
     init_history_db()
 except Exception as e:
     print(f"⚠️ Không init được DB: {e}")
 
+
 # =============================================================
 # RAG + GEMINI
 # =============================================================
-def retrieve_with_metadata(question: str, collection_name: str, k=30):
-    pdf_collections = get_chroma_collections()
+def retrieve_with_metadata(question: str, collection_name: str, k: int = 30):
+    pdf_collections = get_pdf_collections()
     try:
-        col = pdf_collections[collection_name]["collection"]
+        col     = pdf_collections[collection_name]["collection"]
         results = col.query(query_texts=[question], n_results=k)
-        documents = results['documents'][0]
-        metadatas = results['metadatas'][0]
-        distances = results.get('distances', [[1.0]*len(documents)])[0]
+        documents = results["documents"][0]
+        metadatas = results["metadatas"][0]
+        distances = results.get("distances", [[1.0] * len(documents)])[0]
         chunks = []
-        for i, (doc, meta, dist) in enumerate(zip(documents, metadatas, distances)):
-            kw_score = sum(0.1 for w in question.lower().split()
-                           if len(w) > 3 and w in doc.lower())
+        for doc, meta, dist in zip(documents, metadatas, distances):
+            kw_score = sum(
+                0.1 for w in question.lower().split()
+                if len(w) > 3 and w in doc.lower()
+            )
             chunks.append({
-                "content": doc,
-                "source": meta.get("source", "Không rõ nguồn"),
-                "page": meta.get("page", "?"),
-                "relevance_score": (1 - dist) + kw_score
+                "content":         doc,
+                "source":          meta.get("source", "Không rõ nguồn"),
+                "page":            meta.get("page", "?"),
+                "relevance_score": (1 - dist) + kw_score,
             })
-        chunks.sort(key=lambda x: x['relevance_score'], reverse=True)
+        chunks.sort(key=lambda x: x["relevance_score"], reverse=True)
         return chunks[:k]
     except Exception as e:
         print(f"❌ Lỗi truy vấn ChromaDB: {e}")
         return []
+
 
 def format_citations(text: str) -> str:
     text = re.sub(r'\_\(Nguồn:\s*(.*?)\)\_',
@@ -159,7 +276,8 @@ def format_citations(text: str) -> str:
                   r'<small class="citation-source">(Nguồn: \1)</small>', text)
     return text
 
-def ask_gemini(question: str, collection_name: str):
+
+def ask_gemini(question: str, collection_name: str) -> str:
     client = get_genai_client()
     if not _model_name:
         return "❌ Không tìm thấy model Gemini."
@@ -205,28 +323,38 @@ def ask_gemini(question: str, collection_name: str):
 
 ### TRẢ LỜI:"""
 
+    last_error = "Lỗi không xác định"
     for attempt in range(3):
         try:
-            response = client.models.generate_content(model=_model_name, contents=prompt)
+            response = client.models.generate_content(
+                model=_model_name, contents=prompt
+            )
             return format_citations(response.text)
         except Exception as e:
-            err = str(e)
-            if ("429" in err or "503" in err) and attempt < 2:
+            last_error = str(e)
+            if ("429" in last_error or "503" in last_error) and attempt < 2:
                 time.sleep((attempt + 1) * 2)
             else:
-                return f"⚠️ Lỗi API: {err}"
+                break
+
+    return f"⚠️ Lỗi API sau 3 lần thử: {last_error}"
+
 
 # =============================================================
-# ROUTES
+# ROUTES NGƯỜI DÙNG
 # =============================================================
 @app.route("/")
 def home():
-    pdf_collections = get_chroma_collections()
+    pdf_collections = get_pdf_collections()
+    pdf_files       = get_pdf_files()
     if not pdf_collections:
-        return ("<h2>Chưa có quy trình nào.</h2>"
-                "<p>Hãy chạy <code>python build_db.py</code> trước.</p>")
+        return (
+            "<h2>Chưa có tài liệu nào.</h2>"
+            "<p>Admin vui lòng chạy build_db.py và commit lên Git.</p>"
+        )
     pdf_list = [{"id": k, "name": v["name"]} for k, v in pdf_collections.items()]
-    return render_template("index.html", pdf_list=pdf_list)
+    return render_template("index.html", pdf_list=pdf_list, pdf_files=pdf_files)
+
 
 @app.route("/ask", methods=["POST"])
 def ask():
@@ -240,41 +368,16 @@ def ask():
     except Exception as e:
         return jsonify({"answer": f"Lỗi server: {str(e)}"})
 
-@app.route("/history")
-def get_history():
-    conn = psycopg2.connect(DATABASE_URL)
-    c = conn.cursor(cursor_factory=RealDictCursor)
-    c.execute("SELECT id, question, answer, timestamp, collection_name "
-              "FROM history ORDER BY timestamp DESC")
-    rows = c.fetchall()
-    conn.close()
-    return jsonify(rows)
 
-@app.route("/history_html")
-def history_html():
-    conn = psycopg2.connect(DATABASE_URL)
-    c = conn.cursor()
-    c.execute("SELECT question, answer, timestamp, collection_name "
-              "FROM history ORDER BY timestamp DESC")
-    rows = c.fetchall()
-    conn.close()
-    html = """<html><head><title>Lịch sử</title><style>
-    body{font-family:Arial;margin:20px;background:#f5f5f5;}
-    h1{color:#1a73e8;}
-    .entry{background:white;margin-bottom:20px;padding:15px;border-radius:8px;
-           box-shadow:0 1px 3px rgba(0,0,0,.1);}
-    .question{font-weight:bold;color:#1a73e8;}
-    .answer{margin:10px 0;line-height:1.5;}
-    .meta{color:#777;font-size:12px;border-top:1px solid #eee;padding-top:8px;margin-top:8px;}
-    </style></head><body><h1>📜 Lịch sử câu hỏi</h1>"""
-    for row in rows:
-        html += (f"<div class='entry'>"
-                 f"<div class='question'>❓ {row[0]}</div>"
-                 f"<div class='answer'>{row[1]}</div>"
-                 f"<div class='meta'>📂 {row[3]} | 🕒 {row[2]}</div>"
-                 f"</div>")
-    html += "</body></html>"
-    return html
+@app.route("/download/<path:filename>")
+def download_pdf(filename):
+    """Serve file PDF để người dùng download."""
+    return send_from_directory(
+        directory=os.path.abspath(PDF_DIR),
+        path=filename,
+        as_attachment=True   # buộc download, không mở trong tab
+    )
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

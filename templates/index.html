@@ -247,6 +247,40 @@
             </div>
         </div>
     </div>
+    <div class="card">
+    <h2>📂 Tài liệu PDF — Tải về</h2>
+    {% if pdf_files %}
+    <table class="pdf-table">
+      <thead>
+        <tr>
+          <th>Tên file</th>
+          <th>Dung lượng</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for f in pdf_files %}
+        <tr>
+          <td>
+            <div class="file-name">
+              <span class="file-icon">📄</span>
+              {{ f.name }}
+            </div>
+          </td>
+          <td><span class="file-size">{{ f.size }}</span></td>
+          <td>
+            <a class="btn-download" href="/download/{{ f.name }}">
+              ⬇ Tải về
+            </a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+      <p class="empty">Chưa có file PDF nào.</p>
+    {% endif %}
+  </div>
     <script>
         let currentLevel = 3;
         document.querySelectorAll('.level-btn').forEach(btn => {
