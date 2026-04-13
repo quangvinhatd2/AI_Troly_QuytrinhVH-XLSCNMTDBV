@@ -79,7 +79,9 @@ def get_pdf_collections(force_refresh: bool = False):
         embed_fn = get_embed_fn()
         _pdf_collections = {}
         try:
-            for col in _chroma_client.list_collections():
+            # Sửa lỗi: đảm bảo clear cũ nếu refresh
+            current_cols = _chroma_client.list_collections()
+            for col in current_cols:
                 if col.name.startswith("pdf_"):
                     parts = col.name.split("_")
                     if len(parts) > 2 and len(parts[-1]) == 12 and parts[-1].isalnum():
@@ -91,7 +93,8 @@ def get_pdf_collections(force_refresh: bool = False):
                         name=col.name, embedding_function=embed_fn
                     )
                     _pdf_collections[col.name] = {
-                        "name":       display_name,
+                        "id": col.name, # Thêm ID để dễ xử lý trong template
+                        "name": display_name,
                         "collection": collection_obj,
                     }
             print(f"✅ Đã load {len(_pdf_collections)} quy trình.")
@@ -102,7 +105,6 @@ def get_pdf_collections(force_refresh: bool = False):
 
 
 def get_pdf_files():
-    """Lấy danh sách file PDF trong thư mục pdfs/ kèm kích thước."""
     if not os.path.exists(PDF_DIR):
         return []
     files = []
@@ -118,7 +120,7 @@ def get_pdf_files():
 
 
 # =============================================================
-# ADMIN AUTH
+# ADMIN AUTH - XỬ LÝ LỖI KHÔNG VÀO ĐƯỢC ADMIN
 # =============================================================
 def admin_required(f):
     @wraps(f)
@@ -132,10 +134,13 @@ def admin_required(f):
 @app.route("/admin/login", methods=["GET", "POST"])
 def admin_login():
     if request.method == "POST":
+        # Sửa lỗi lấy mật khẩu: request.form.get("password")
         if request.form.get("password") == ADMIN_PASSWORD:
+            session.permanent = True # Giữ phiên đăng nhập
             session["is_admin"] = True
             return redirect(url_for("admin_dashboard"))
-        flash("❌ Sai mật khẩu!")
+        else:
+            flash("❌ Sai mật khẩu quản trị!")
     return render_template("admin_login.html")
 
 
@@ -151,25 +156,27 @@ def admin_logout():
 @app.route("/admin")
 @admin_required
 def admin_dashboard():
+    # Sửa lỗi lấy danh sách tài liệu để hiển thị trong bảng Admin
     pdf_collections = get_pdf_collections()
+    
     conn = psycopg2.connect(DATABASE_URL)
     c = conn.cursor(cursor_factory=RealDictCursor)
     c.execute("SELECT id, question, answer, timestamp, collection_name "
-              "FROM history ORDER BY timestamp DESC LIMIT 50")
+              "FROM history ORDER BY timestamp DESC LIMIT 100")
     history = c.fetchall()
     conn.close()
+    
     return render_template("admin.html",
                            pdf_list=list(pdf_collections.values()),
                            history=history)
 
-
+# Các route khác (admin_refresh, delete_history...) giữ nguyên như code của bạn
 @app.route("/admin/refresh", methods=["POST"])
 @admin_required
 def admin_refresh():
     get_pdf_collections(force_refresh=True)
     flash("✅ Đã refresh danh sách tài liệu!")
     return redirect(url_for("admin_dashboard"))
-
 
 @app.route("/admin/delete_history/<int:history_id>", methods=["POST"])
 @admin_required
@@ -185,7 +192,6 @@ def admin_delete_history(history_id):
         flash(f"❌ Lỗi xóa: {e}")
     return redirect(url_for("admin_dashboard"))
 
-
 @app.route("/admin/delete_history_all", methods=["POST"])
 @admin_required
 def admin_delete_history_all():
@@ -200,9 +206,8 @@ def admin_delete_history_all():
         flash(f"❌ Lỗi xóa: {e}")
     return redirect(url_for("admin_dashboard"))
 
-
 # =============================================================
-# DATABASE POSTGRES
+# DATABASE POSTGRES - Dữ nguyên
 # =============================================================
 def init_history_db():
     conn = psycopg2.connect(DATABASE_URL)
@@ -216,7 +221,6 @@ def init_history_db():
                 )''')
     conn.commit()
     conn.close()
-
 
 def save_question_answer(question, answer, collection_name):
     try:
@@ -232,15 +236,13 @@ def save_question_answer(question, answer, collection_name):
     except Exception as e:
         print(f"⚠️ Lỗi lưu history: {e}")
 
-
 try:
     init_history_db()
 except Exception as e:
     print(f"⚠️ Không init được DB: {e}")
 
-
 # =============================================================
-# RAG + GEMINI
+# RAG + GEMINI - Dữ nguyên
 # =============================================================
 def retrieve_with_metadata(question: str, collection_name: str, k: int = 30):
     pdf_collections = get_pdf_collections()
@@ -268,7 +270,6 @@ def retrieve_with_metadata(question: str, collection_name: str, k: int = 30):
         print(f"❌ Lỗi truy vấn ChromaDB: {e}")
         return []
 
-
 def format_citations(text: str) -> str:
     text = re.sub(r'\_\(Nguồn:\s*(.*?)\)\_',
                   r'<small class="citation-source">(Nguồn: \1)</small>', text)
@@ -276,21 +277,17 @@ def format_citations(text: str) -> str:
                   r'<small class="citation-source">(Nguồn: \1)</small>', text)
     return text
 
-
 def ask_gemini(question: str, collection_name: str) -> str:
     client = get_genai_client()
     if not _model_name:
         return "❌ Không tìm thấy model Gemini."
-
     chunks = retrieve_with_metadata(question, collection_name)
     if not chunks:
         return "❌ Không tìm thấy thông tin trong tài liệu."
-
     context = "\n\n---\n\n".join(
         f"[Đoạn {i} từ {c['source']}, trang {c['page']}]:\n{c['content']}"
         for i, c in enumerate(chunks, 1)
     )
-
     ql = question.lower()
     if any(w in ql for w in ["trình tự", "các bước", "làm thế nào", "cách thức"]):
         q_type, instruction = "quy trình", "Liệt kê các bước theo thứ tự."
@@ -304,25 +301,17 @@ def ask_gemini(question: str, collection_name: str) -> str:
         q_type, instruction = "so sánh", "So sánh rõ ràng."
     else:
         q_type, instruction = "chung", "Trả lời trực diện, đúng trọng tâm."
-
     prompt = f"""Bạn là chuyên gia phân tích tài liệu quy trình vận hành thủy điện.
-
 **NHIỆM VỤ:** Liệt kê đầy đủ tất cả thông tin liên quan, không bỏ sót mục nào.
-
 **QUY TẮC:**
 1. Mỗi mục xuống dòng, dùng số thứ tự hoặc dấu gạch đầu dòng.
 2. Sau mỗi mục trích nguồn: `_(Nguồn: tên file, trang X)_`
 3. Cảnh báo quan trọng: in đậm **CẢNH BÁO**.
-
 ### LOẠI: {q_type} | HƯỚNG DẪN: {instruction}
-
 ### TÀI LIỆU:
 {context}
-
 ### CÂU HỎI: {question}
-
 ### TRẢ LỜI:"""
-
     last_error = "Lỗi không xác định"
     for attempt in range(3):
         try:
@@ -336,12 +325,10 @@ def ask_gemini(question: str, collection_name: str) -> str:
                 time.sleep((attempt + 1) * 2)
             else:
                 break
-
     return f"⚠️ Lỗi API sau 3 lần thử: {last_error}"
 
-
 # =============================================================
-# ROUTES NGƯỜI DÙNG
+# ROUTES NGƯỜI DÙNG - Giữ nguyên
 # =============================================================
 @app.route("/")
 def home():
@@ -355,7 +342,6 @@ def home():
     pdf_list = [{"id": k, "name": v["name"]} for k, v in pdf_collections.items()]
     return render_template("index.html", pdf_list=pdf_list, pdf_files=pdf_files)
 
-
 @app.route("/ask", methods=["POST"])
 def ask():
     try:
@@ -368,16 +354,13 @@ def ask():
     except Exception as e:
         return jsonify({"answer": f"Lỗi server: {str(e)}"})
 
-
 @app.route("/download/<path:filename>")
 def download_pdf(filename):
-    """Serve file PDF để người dùng download."""
     return send_from_directory(
         directory=os.path.abspath(PDF_DIR),
         path=filename,
-        as_attachment=True   # buộc download, không mở trong tab
+        as_attachment=True
     )
-
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

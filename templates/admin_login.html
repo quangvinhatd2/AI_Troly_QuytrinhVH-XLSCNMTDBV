@@ -5,53 +5,119 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Đăng nhập quản trị - HPCBANVE</title>
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
+    /* ĐỒNG BỘ FONT CHỮ TIMES NEW ROMAN */
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: "Times New Roman", Times, serif; }
+
     body { 
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
       background: #f0f2f5;
-      display: flex; align-items: center; justify-content: center; 
+      display: flex; 
+      align-items: center; 
+      justify-content: center; 
       min-height: 100vh; 
     }
+
     .card { 
-      background: white; padding: 40px; border-radius: 12px;
-      box-shadow: 0 4px 20px rgba(0,0,0,.08); width: 100%; max-width: 360px; 
+      background: white; 
+      padding: 40px; 
+      border-radius: 16px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.1); 
+      width: 100%; 
+      max-width: 400px; 
+      border: 1px solid #e0e0e0;
     }
-    h2 { color: #1a73e8; margin-bottom: 24px; text-align: center; font-weight: 600; }
+
+    /* TIÊU ĐỀ GRADIENT ĐỒNG BỘ */
+    h2 { 
+      background: linear-gradient(135deg, #1a73e8, #0d47a1);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 24px; 
+      text-align: center; 
+      font-weight: bold; 
+      font-size: 26px;
+    }
     
-    /* Hiển thị lỗi từ flash của Flask */
+    /* HIỂN THỊ LỖI FLASH */
     .flash { 
-      background: #fce8e6; color: #c5221f; padding: 12px;
-      border-radius: 6px; margin-bottom: 20px; font-size: 14px;
-      border-left: 4px solid #d93025;
+      background: #fee8e7; 
+      color: #d93025; 
+      padding: 12px;
+      border-radius: 8px; 
+      margin-bottom: 20px; 
+      font-size: 15px;
+      border-left: 5px solid #d93025;
+      text-align: center;
     }
     
-    label { display: block; font-size: 13px; color: #5f6368; margin-bottom: 8px; font-weight: 500; }
+    label { 
+      display: block; 
+      font-size: 16px; 
+      color: #3c4043; 
+      margin-bottom: 10px; 
+      font-weight: bold; 
+    }
     
     input[type=password] { 
-      width: 100%; padding: 12px 14px; border: 1px solid #dadce0;
-      border-radius: 6px; font-size: 15px; outline: none;
-      transition: border-color 0.2s;
+      width: 100%; 
+      padding: 14px 16px; 
+      border: 1px solid #dadce0;
+      border-radius: 8px; 
+      font-size: 16px; 
+      outline: none;
+      transition: all 0.3s;
+      background: #f8f9fa;
     }
-    input[type=password]:focus { border-color: #1a73e8; box-shadow: 0 0 0 2px rgba(26,115,232,0.1); }
+
+    input[type=password]:focus { 
+      border-color: #1a73e8; 
+      background: #fff;
+      box-shadow: 0 0 0 4px rgba(26,115,232,0.1); 
+    }
     
     button { 
-      width: 100%; margin-top: 25px; padding: 12px;
-      background: #1a73e8; color: white; border: none;
-      border-radius: 6px; font-size: 15px; font-weight: 600;
-      cursor: pointer; transition: background 0.2s;
+      width: 100%; 
+      margin-top: 25px; 
+      padding: 14px;
+      background: linear-gradient(135deg, #1a73e8, #0d47a1);
+      color: white; 
+      border: none;
+      border-radius: 30px; 
+      font-size: 17px; 
+      font-weight: bold;
+      cursor: pointer; 
+      transition: all 0.3s;
+      box-shadow: 0 4px 6px rgba(26,115,232,0.2);
     }
-    button:hover { background: #1558b0; }
+
+    button:hover { 
+      transform: translateY(-2px);
+      box-shadow: 0 6px 12px rgba(26,115,232,0.3);
+      filter: brightness(1.1);
+    }
+
+    button:active {
+      transform: translateY(0);
+    }
     
     .back-home {
-      display: block; text-align: center; margin-top: 20px;
-      font-size: 13px; color: #70757a; text-decoration: none;
+      display: block; 
+      text-align: center; 
+      margin-top: 25px;
+      font-size: 15px; 
+      color: #70757a; 
+      text-decoration: none;
+      transition: color 0.2s;
     }
-    .back-home:hover { color: #1a73e8; text-decoration: underline; }
+
+    .back-home:hover { 
+      color: #1a73e8; 
+      text-decoration: underline; 
+    }
   </style>
 </head>
 <body>
   <div class="card">
-    <h2>🔐 Admin Login</h2>
+    <h2>🔐 Đăng nhập Quản trị</h2>
     
     {% with messages = get_flashed_messages() %}
       {% if messages %}
@@ -64,12 +130,12 @@
     <form method="POST">
       <label for="pwd">Mật khẩu hệ thống</label>
       <input type="password" id="pwd" name="password" autofocus required 
-             placeholder="Nhập mật khẩu quản trị...">
+             placeholder="Nhập mật khẩu để tiếp tục...">
       
-      <button type="submit">Xác nhận đăng nhập</button>
+      <button type="submit">Xác nhận đăng nhập ➤</button>
     </form>
 
-    <a href="{{ url_for('home') }}" class="back-home">← Quay lại trang chủ</a>
+    <a href="{{ url_for('home') }}" class="back-home">← Quay lại giao diện người dùng</a>
   </div>
 </body>
 </html>
