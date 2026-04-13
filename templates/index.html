@@ -4,36 +4,84 @@
     <meta charset="UTF-8">
     <title>EVNGENCO1-HPCBANVE - Trợ lý Quy trình VH&XLSC NM Thủy điện Bản Vẽ</title>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+        /* CẬP NHẬT FONT CHỮ TIMES NEW ROMAN CHO TOÀN BỘ WEB */
+        * { 
+            margin: 0; 
+            padding: 0; 
+            box-sizing: border-box; 
+            font-family: "Times New Roman", Times, serif; 
+        }
+
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background: #f0f2f5;
             height: 100vh;
             display: flex;
             flex-direction: column;
+            font-size: 16px; 
         }
+
+        /* HEADER HIỆN ĐẠI */
         .header {
             background: linear-gradient(135deg, #1a73e8, #0d47a1);
             color: white;
-            padding: 20px 30px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            padding: 15px 30px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            z-index: 10;
         }
-        .header h1 { font-size: 24px; margin-bottom: 10px; }
+        .header-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+        .header h1 { font-size: 24px; font-weight: bold; letter-spacing: -0.5px; }
+        
+        .admin-btn {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: white;
+            text-decoration: none;
+            font-size: 15px;
+            font-weight: 500;
+            padding: 8px 16px;
+            border: 1px solid rgba(255,255,255,0.3);
+            border-radius: 8px;
+            background: rgba(255,255,255,0.1);
+            backdrop-filter: blur(5px);
+            transition: all 0.3s ease;
+        }
+        .admin-btn:hover {
+            background: rgba(255,255,255,0.25);
+            border-color: rgba(255,255,255,0.6);
+            transform: translateY(-1px);
+        }
+
         .source-selector {
             display: flex; gap: 15px; align-items: center; flex-wrap: wrap;
         }
         select {
             padding: 8px 15px; border-radius: 20px; border: none;
-            background: white; font-size: 14px; min-width: 250px; cursor: pointer;
+            background: white; font-size: 15px; min-width: 250px; cursor: pointer;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            font-family: "Times New Roman", Times, serif;
         }
         .level-buttons { display: flex; gap: 10px; margin-left: auto; }
         .level-btn {
-            padding: 6px 15px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.3);
-            background: rgba(255,255,255,0.1); color: white; cursor: pointer; font-size: 12px; transition: all 0.2s;
+            padding: 6px 18px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.3);
+            background: rgba(255,255,255,0.1); color: white; cursor: pointer; font-size: 14px; transition: all 0.2s;
+            font-family: "Times New Roman", Times, serif;
         }
-        .level-btn.active { background: white; color: #1a73e8; border-color: white; }
+        .level-btn.active { background: white; color: #1a73e8; border-color: white; font-weight: bold; }
 
-        .main-container { display: flex; flex: 1; overflow: hidden; padding: 0 20px; gap: 20px; }
+        .main-container { 
+            display: flex; 
+            flex: 1; 
+            overflow: hidden; 
+            padding: 0 20px; 
+            gap: 20px;
+            height: calc(100vh - 120px); 
+        }
         
         /* Khung Chat */
         .chat-panel {
@@ -42,26 +90,30 @@
         }
         .messages { flex: 1; overflow-y: auto; padding: 20px; }
         .message { margin-bottom: 20px; animation: fadeIn 0.3s ease; }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         
         .question-bubble {
-            background: #e8f0fe; padding: 12px 18px; border-radius: 20px 20px 5px 20px;
-            max-width: 80%; margin-left: auto; color: #1a73e8;
+            background: #e8f0fe; padding: 12px 18px; border-radius: 15px 15px 2px 15px;
+            max-width: 80%; margin-left: auto; color: #1a73e8; font-weight: bold;
         }
         .answer-bubble {
-            background: #f8f9fa; padding: 15px 20px; border-radius: 20px 20px 20px 5px;
-            max-width: 90%; margin-right: auto; line-height: 1.6; color: #202124; white-space: pre-wrap; font-size: 14px;
+            background: #f8f9fa; padding: 15px 20px; border-radius: 15px 15px 15px 2px;
+            max-width: 95%; margin-right: auto; line-height: 1.7; color: #202124; white-space: pre-wrap; font-size: 16px;
         }
+        .answer-bubble h3 { margin-bottom: 8px; font-size: 18px; color: #0d47a1; }
+
         .input-area {
             padding: 15px 20px; border-top: 1px solid #e0e0e0; display: flex; gap: 10px; background: white;
         }
         textarea {
-            flex: 1; padding: 12px; border: 1px solid #dadce0; border-radius: 24px;
-            resize: none; font-size: 14px; outline: none;
+            flex: 1; padding: 12px 20px; border: 1px solid #dadce0; border-radius: 24px;
+            resize: none; font-size: 16px; outline: none; font-family: "Times New Roman", Times, serif;
         }
-        #sendBtn { padding: 0 24px; background: #1a73e8; color: white; border: none; border-radius: 24px; cursor: pointer; font-weight: 500; }
+        #sendBtn { 
+            padding: 0 24px; background: #1a73e8; color: white; border: none; border-radius: 24px; 
+            cursor: pointer; font-weight: bold; font-family: "Times New Roman", Times, serif;
+        }
 
-        /* Cột bên phải: Lịch sử & PDF */
+        /* Cột bên phải */
         .right-panel {
             width: 380px; display: flex; flex-direction: column; gap: 20px; margin: 20px 0; overflow-y: auto;
         }
@@ -71,42 +123,79 @@
         }
         .card-header {
             padding: 15px 20px; background: #fff; border-bottom: 1px solid #eee;
-            font-weight: 600; color: #202124; display: flex; justify-content: space-between; align-items: center;
+            font-weight: bold; color: #202124; display: flex; justify-content: space-between; align-items: center;
+            font-size: 17px;
+        }
+
+        /* Ô TÌM KIẾM MỚI */
+        .search-container {
+            padding: 10px 15px;
+            background: #fff;
+            border-bottom: 1px solid #eee;
+        }
+        .search-input {
+            width: 100%;
+            padding: 8px 15px;
+            border: 1px solid #dadce0;
+            border-radius: 20px;
+            font-size: 13px;
+            outline: none;
+            font-family: "Times New Roman", Times, serif;
+            transition: all 0.3s;
+        }
+        .search-input:focus {
+            border-color: #1a73e8;
+            box-shadow: 0 0 5px rgba(26,115,232,0.2);
         }
         
-        /* Lịch sử */
         .history-list { flex: 1; max-height: 300px; overflow-y: auto; padding: 15px; background: #f8f9fa; }
         .history-item {
             background: white; border-radius: 8px; padding: 10px; margin-bottom: 10px;
-            cursor: pointer; border-left: 3px solid transparent; transition: 0.2s;
+            cursor: pointer; border-left: 4px solid transparent; transition: 0.2s;
         }
         .history-item:hover { background: #e8f0fe; border-left-color: #1a73e8; }
-        .history-question { font-weight: 600; color: #1a73e8; font-size: 12px; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; }
+        .history-question { font-weight: bold; color: #1a73e8; font-size: 14px; }
 
-        /* Bảng PDF */
-        .pdf-container { padding: 10px; max-height: 400px; overflow-y: auto; }
+        /* PHẦN TÀI LIỆU PDF ĐÃ ĐƯỢC TỐI ƯU 8 FILE */
+        .pdf-container { 
+            padding: 5px 10px; 
+            max-height: 320px; 
+            overflow-y: auto; 
+        }
         .pdf-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-        .pdf-table th { text-align: left; padding: 8px; color: #5f6368; border-bottom: 2px solid #f0f2f5; }
-        .pdf-table td { padding: 10px 8px; border-bottom: 1px solid #f0f2f5; }
-        .file-info { display: flex; flex-direction: column; }
-        .file-name { font-weight: 500; color: #202124; word-break: break-all; }
+        .pdf-table th { text-align: left; padding: 6px 8px; color: #5f6368; border-bottom: 2px solid #f0f2f5; font-size: 12px; }
+        .pdf-table td { padding: 6px 8px; border-bottom: 1px solid #f0f2f5; vertical-align: middle; }
+        .file-info { display: flex; flex-direction: column; line-height: 1.3; }
+        .file-name { font-weight: bold; color: #202124; overflow: hidden; text-overflow: ellipsis; max-width: 200px; }
         .file-size { font-size: 11px; color: #70757a; }
+        
         .btn-download {
-            color: #1a73e8; text-decoration: none; font-weight: 600; font-size: 12px;
-            padding: 4px 8px; border-radius: 4px; background: #f1f3f4;
+            color: #1a73e8; text-decoration: none; font-weight: bold; font-size: 11px;
+            padding: 3px 8px; border-radius: 4px; background: #f1f3f4; display: inline-block;
         }
         .btn-download:hover { background: #e8f0fe; }
+
+        /* Tùy chỉnh thanh cuộn PDF */
+        .pdf-container::-webkit-scrollbar { width: 5px; }
+        .pdf-container::-webkit-scrollbar-track { background: #f1f1f1; }
+        .pdf-container::-webkit-scrollbar-thumb { background: #ccc; border-radius: 10px; }
 
         .loading {
             display: inline-block; width: 16px; height: 16px; border: 2px solid #e0e0e0;
             border-top-color: #1a73e8; border-radius: 50%; animation: spin 0.8s linear infinite;
         }
         @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
     </style>
 </head>
 <body>
     <div class="header">
-        <h1>🤖 EVNGENCO1-HPCBANVE - Trợ lý Quy trình VH&XLSC NM Thủy điện Bản Vẽ</h1>
+        <div class="header-top">
+            <h1>🤖 EVNGENCO1-HPCBANVE</h1>
+            <a href="/admin/login" class="admin-btn">
+                <span>🔐</span> Quản trị hệ thống
+            </a>
+        </div>
         <div class="source-selector">
             <label>📚 Chọn tài liệu:</label>
             <select id="collection">
@@ -120,22 +209,14 @@
             </div>
         </div>
     </div>
-<div class="header">
-    <div style="display: flex; justify-content: space-between; align-items: center;">
-        <h1>🤖 EVNGENCO1-HPCBANVE - Trợ lý Quy trình VH&XLSC NM Thủy điện Bản Vẽ</h1>
-        <a href="/admin/login" style="color: white; text-decoration: none; font-size: 14px; padding: 8px 15px; border: 1px solid rgba(255,255,255,0.5); border-radius: 20px; background: rgba(255,255,255,0.1);">
-            🔐 Admin
-        </a>
-    </div>
-    <div class="source-selector">...</div>
-</div>
+
     <div class="main-container">
         <div class="chat-panel">
             <div class="messages" id="messages">
                 <div class="message">
                     <div class="answer-bubble">
                         <h3>🤖 EVNGENCO1-HPCBANVE</h3>
-        Chào bạn! Dựa trên các tài liệu được cung cấp, Tôi là trợ lý AI chuyên về quy trình vận hành và xử lý sự cố NM Thủy điện Bản Vẽ. Hãy chọn tài liệu và đặt câu hỏi cho tôi bên dưới.
+                        Chào bạn! Dựa trên các tài liệu được cung cấp, Tôi là trợ lý AI chuyên về quy trình vận hành và xử lý sự cố NM Thủy điện Bản Vẽ. Hãy chọn tài liệu và đặt câu hỏi cho tôi bên dưới.
                     </div>
                 </div>
             </div>
@@ -160,26 +241,29 @@
                 <div class="card-header">
                     📂 Tài liệu PDF — Tải về
                 </div>
+                <div class="search-container">
+                    <input type="text" id="pdfSearch" class="search-input" placeholder="🔍 Tìm tên quy trình..." onkeyup="filterPDF()">
+                </div>
                 <div class="pdf-container">
                     {% if pdf_files %}
-                    <table class="pdf-table">
+                    <table class="pdf-table" id="pdfTable">
                         <thead>
                             <tr>
                                 <th>Tên file</th>
-                                <th></th>
+                                <th style="text-align: right;">Hành động</th>
                             </tr>
                         </thead>
                         <tbody>
                             {% for f in pdf_files %}
-                            <tr>
+                            <tr class="pdf-row">
                                 <td>
                                     <div class="file-info">
-                                        <span class="file-name">📄 {{ f.name }}</span>
+                                        <span class="file-name" title="{{ f.name }}">📄 {{ f.name }}</span>
                                         <span class="file-size">{{ f.size }}</span>
                                     </div>
                                 </td>
                                 <td style="text-align: right;">
-                                    <a class="btn-download" href="/download/{{ f.name }}"> Tải về</a>
+                                    <a class="btn-download" href="/download/{{ f.name }}">Tải về</a>
                                 </td>
                             </tr>
                             {% endfor %}
@@ -194,6 +278,26 @@
     </div>
 
     <script>
+        // HÀM LỌC PDF MỚI BỔ SUNG
+        function filterPDF() {
+            const input = document.getElementById('pdfSearch');
+            const filter = input.value.toLowerCase();
+            const table = document.getElementById('pdfTable');
+            const rows = table.getElementsByClassName('pdf-row');
+
+            for (let i = 0; i < rows.length; i++) {
+                const fileName = rows[i].getElementsByClassName('file-name')[0];
+                if (fileName) {
+                    const textValue = fileName.textContent || fileName.innerText;
+                    if (textValue.toLowerCase().indexOf(filter) > -1) {
+                        rows[i].style.display = "";
+                    } else {
+                        rows[i].style.display = "none";
+                    }
+                }
+            }
+        }
+
         let currentLevel = 3;
         document.querySelectorAll('.level-btn').forEach(btn => {
             btn.addEventListener('click', () => {
@@ -211,13 +315,11 @@
             const collectionName = document.getElementById('collection').value;
             const messagesDiv = document.getElementById('messages');
 
-            // Hiển thị câu hỏi của user
             const questionDiv = document.createElement('div');
             questionDiv.className = 'message';
             questionDiv.innerHTML = `<div class="question-bubble">${escapeHtml(question)}</div>`;
             messagesDiv.appendChild(questionDiv);
 
-            // Loading
             const loadingDiv = document.createElement('div');
             loadingDiv.className = 'message';
             loadingDiv.id = 'loadingMsg';
