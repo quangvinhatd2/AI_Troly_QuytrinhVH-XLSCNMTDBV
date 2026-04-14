@@ -501,82 +501,20 @@ def ready():
 
 @app.route("/")
 def home():
-    # --- FIX: Hiển thị loading screen thay vì trắng khi chưa sẵn sàng ---
+    global _app_ready, _warmup_status
+    
+    # Nếu chưa ready và chưa có luồng nào đang chạy, thì mới kích hoạt warmup
     if not _app_ready:
-        return """<!DOCTYPE html>
-<html lang="vi">
-<head>
-    <meta charset="UTF-8">
-    <title>Đang khởi động...</title>
-    <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body {
-            font-family: 'Segoe UI', sans-serif;
-            display: flex; flex-direction: column;
-            align-items: center; justify-content: center;
-            min-height: 100vh; background: #f0f4f8; color: #333;
-        }
-        .card {
-            background: white; border-radius: 16px;
-            padding: 48px 40px; text-align: center;
-            box-shadow: 0 4px 24px rgba(0,0,0,0.08);
-            max-width: 400px; width: 90%;
-        }
-        .spinner {
-            width: 56px; height: 56px;
-            border: 5px solid #e2e8f0;
-            border-top-color: #3b82f6;
-            border-radius: 50%;
-            animation: spin 0.9s linear infinite;
-            margin: 0 auto 24px;
-        }
-        @keyframes spin { to { transform: rotate(360deg); } }
-        h2 { font-size: 1.25rem; margin-bottom: 10px; color: #1e293b; }
-        p  { font-size: 0.9rem; color: #64748b; line-height: 1.5; }
-        .status {
-            margin-top: 20px; padding: 10px 16px;
-            background: #f1f5f9; border-radius: 8px;
-            font-size: 0.82rem; color: #475569;
-        }
-        .dot { display: inline-block; animation: blink 1.2s infinite; }
-        .dot:nth-child(2) { animation-delay: 0.2s; }
-        .dot:nth-child(3) { animation-delay: 0.4s; }
-        @keyframes blink { 0%,80%,100%{opacity:0} 40%{opacity:1} }
-    </style>
-</head>
-<body>
-    <div class="card">
-        <div class="spinner"></div>
-        <h2>⚙️ Hệ thống đang khởi động</h2>
-        <p>Đang tải mô hình AI và cơ sở dữ liệu tài liệu, vui lòng chờ trong giây lát<span class="dot">.</span><span class="dot">.</span><span class="dot">.</span></p>
-        <div class="status" id="status-text">Đang khởi động...</div>
-    </div>
-    <script>
-        // Tự động kiểm tra mỗi 3 giây, redirect khi sẵn sàng
-        async function checkReady() {
-            try {
-                const res  = await fetch('/ready');
-                const data = await res.json();
-                document.getElementById('status-text').textContent = data.status;
-                if (data.ready) {
-                    window.location.reload();
-                } else {
-                    setTimeout(checkReady, 3000);
-                }
-            } catch {
-                setTimeout(checkReady, 3000);
-            }
-        }
-        checkReady();
-    </script>
-</body>
-</html>""", 503
+        # Kiểm tra xem có đang trong quá trình tải không để tránh chạy trùng
+        if _warmup_status == "Đang khởi động...":
+            _warmup_status = "Đang bắt đầu tiến trình nạp mô hình..."
+            threading.Thread(target=_warmup, daemon=True).start()
+            
+        return render_template_loading() # Trả về giao diện loading (đoạn html dài của bạn)
 
+    # Nếu đã ready thì vào trang chủ bình thường
     pdf_list  = get_collection_names_only()
     pdf_files = get_pdf_files()
-    if not pdf_list:
-        return ("<h2>Chưa có tài liệu nào.</h2>"
-                "<p>Admin vui lòng upload PDF và rebuild database.</p>")
     return render_template("index.html", pdf_list=pdf_list, pdf_files=pdf_files)
 
 @app.route("/ask", methods=["POST"])
@@ -663,7 +601,7 @@ try:
 except Exception as e:
     logger.error(f"Lỗi khởi tạo DB: {e}")
 
-threading.Thread(target=_warmup, daemon=True).start()
+# threading.Thread(target=_warmup, daemon=True).start()
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
