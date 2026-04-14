@@ -631,20 +631,28 @@ def download_pdf(filename):
 # =============================================================
 def _warmup():
     global _app_ready, _warmup_status
-    logger.info("Warm-up: bắt đầu load embedding + ChromaDB...")
+    logger.info("Warm-up: bắt đầu...")
     try:
-        _warmup_status = "Đang tải mô hình embedding..."
-        get_embed_fn()
-
-        _warmup_status = "Đang tải cơ sở dữ liệu tài liệu..."
+        # 1. Kiểm tra kết nối DB trước (nhanh nhất)
+        _warmup_status = "Đang kiểm tra cơ sở dữ liệu..."
+        ensure_db_pool()
+        
+        # 2. Load Collections (ChromaDB)
+        _warmup_status = "Đang kết nối thư viện tài liệu..."
         get_pdf_collections()
+
+        # 3. Load Embedding (Đây là bước nặng nhất, dễ treo nhất)
+        _warmup_status = "Đang tải bộ não AI (Embedding)..."
+        get_embed_fn()
 
         _app_ready     = True
         _warmup_status = "Sẵn sàng!"
         logger.info("✅ Warm-up hoàn tất!")
     except Exception as e:
-        _warmup_status = f"Lỗi khởi động: {e}"
-        logger.error(f"Warm-up thất bại: {e}")
+        logger.error(f"❌ Warm-up thất bại: {e}")
+        # Ép buộc sẵn sàng dù lỗi để Admin có thể vào sửa/rebuild
+        _app_ready = True 
+        _warmup_status = f"Khởi động có lỗi: {str(e)[:50]}"
 
 # =============================================================
 # KHỞI ĐỘNG
