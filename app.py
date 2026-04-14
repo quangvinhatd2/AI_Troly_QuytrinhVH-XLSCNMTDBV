@@ -99,7 +99,7 @@ def get_embed_fn():
         from sentence_transformers import SentenceTransformer
         from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
         logger.info("Load SentenceTransformer...")
-        _model = SentenceTransformer("dangvantuan/vietnamese-embedding")
+        _model = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
         _model.max_seq_length = 256
 
         class _EmbedFn(EmbeddingFunction):

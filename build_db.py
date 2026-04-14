@@ -3,7 +3,6 @@ import re
 import hashlib
 from pathlib import Path
 from dotenv import load_dotenv
-
 import chromadb
 from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -12,15 +11,15 @@ from sentence_transformers import SentenceTransformer
 
 load_dotenv()
 
-PDF_DIR = "pdfs"
+PDF_DIR     = "pdfs"
 PERSIST_DIR = "./chroma_db_gemini"
-
 
 # ── Embedding ────────────────────────────────────────────────
 class VietnameseEmbeddingFunction(EmbeddingFunction):
     def __init__(self):
         print("📥 Loading embedding model...")
-        self.model = SentenceTransformer("dangvantuan/vietnamese-embedding")
+        # ĐÃ ĐỔI: ~120MB thay vì ~500MB, load nhanh gấp 4-5 lần
+        self.model = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
         self.model.max_seq_length = 256
         print("✅ Model ready!")
 
@@ -32,7 +31,6 @@ class VietnameseEmbeddingFunction(EmbeddingFunction):
             convert_to_numpy=True
         ).tolist()
 
-
 # ── Collection name ─────────────────────────────────────────
 def sanitize_collection_name(name: str) -> str:
     name = re.sub(r'[^a-zA-Z0-9._-]', '_', name)
@@ -40,17 +38,14 @@ def sanitize_collection_name(name: str) -> str:
         name = 'pdf_' + name
     return name[:480]
 
-
 def get_collection_name(pdf_path: str) -> str:
-    content = Path(pdf_path).read_bytes()
+    content  = Path(pdf_path).read_bytes()
     hash_val = hashlib.md5(content).hexdigest()[:12]
-    stem = Path(pdf_path).stem
+    stem     = Path(pdf_path).stem
     return f"pdf_{sanitize_collection_name(stem)}_{hash_val}"
-
 
 # ── Main ─────────────────────────────────────────────────────
 if __name__ == "__main__":
-
     if not os.path.exists(PDF_DIR):
         os.makedirs(PDF_DIR)
         print(f"📁 Created {PDF_DIR}")
@@ -61,27 +56,25 @@ if __name__ == "__main__":
         print("⚠️ No PDF found.")
         exit(0)
 
-    embed_fn = VietnameseEmbeddingFunction()
+    embed_fn      = VietnameseEmbeddingFunction()
     chroma_client = chromadb.PersistentClient(path=PERSIST_DIR)
-
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=1500,
         chunk_overlap=300,
     )
 
     for pdf_file in sorted(pdf_files):
-        col_name = get_collection_name(str(pdf_file))
-
+        col_name      = get_collection_name(str(pdf_file))
         existing_cols = [c.name for c in chroma_client.list_collections()]
+
         if col_name in existing_cols:
             print(f"✅ Skip: {pdf_file.name}")
             continue
 
         print(f"\n🔄 Processing: {pdf_file.name}")
-
         try:
             loader = PDFPlumberLoader(str(pdf_file))
-            docs = loader.load()
+            docs   = loader.load()
         except Exception as e:
             print(f"❌ PDF error: {e}")
             continue
@@ -94,24 +87,20 @@ if __name__ == "__main__":
                 embedding_function=embed_fn,
             )
 
-            # 🔥 ADD BATCH (QUAN TRỌNG)
             batch_size = 100
-
             for i in range(0, len(chunks), batch_size):
                 batch = chunks[i:i + batch_size]
-
                 collection.add(
                     documents=[c.page_content for c in batch],
                     ids=[f"chunk_{i+j}" for j in range(len(batch))],
                     metadatas=[
                         {
                             "source": pdf_file.name,
-                            "page": c.metadata.get("page", 0),
+                            "page":   c.metadata.get("page", 0),
                         }
                         for c in batch
                     ],
                 )
-
             print(f"✅ Added {len(chunks)} chunks")
 
         except Exception as e:
