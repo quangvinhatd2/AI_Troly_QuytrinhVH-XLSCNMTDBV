@@ -12,23 +12,28 @@ from sentence_transformers import SentenceTransformer
 
 load_dotenv()
 
-PDF_DIR    = "pdfs"
+PDF_DIR = "pdfs"
 PERSIST_DIR = "./chroma_db_gemini"
 
 
 # ── Embedding ────────────────────────────────────────────────
 class VietnameseEmbeddingFunction(EmbeddingFunction):
     def __init__(self):
-        print("📥 Đang khởi tạo model embedding tiếng Việt...")
+        print("📥 Loading embedding model...")
         self.model = SentenceTransformer("dangvantuan/vietnamese-embedding")
         self.model.max_seq_length = 256
-        print("✅ Model sẵn sàng!")
+        print("✅ Model ready!")
 
     def __call__(self, input: Documents) -> Embeddings:
-        return self.model.encode(input, convert_to_numpy=True).tolist()
+        return self.model.encode(
+            input,
+            batch_size=32,
+            show_progress_bar=False,
+            convert_to_numpy=True
+        ).tolist()
 
 
-# ── Tên collection ───────────────────────────────────────────
+# ── Collection name ─────────────────────────────────────────
 def sanitize_collection_name(name: str) -> str:
     name = re.sub(r'[^a-zA-Z0-9._-]', '_', name)
     if not name or not name[0].isalnum():
@@ -37,95 +42,83 @@ def sanitize_collection_name(name: str) -> str:
 
 
 def get_collection_name(pdf_path: str) -> str:
-    content  = Path(pdf_path).read_bytes()
+    content = Path(pdf_path).read_bytes()
     hash_val = hashlib.md5(content).hexdigest()[:12]
-    stem     = Path(pdf_path).stem
+    stem = Path(pdf_path).stem
     return f"pdf_{sanitize_collection_name(stem)}_{hash_val}"
 
 
 # ── Main ─────────────────────────────────────────────────────
 if __name__ == "__main__":
 
-    # Tạo thư mục pdfs nếu chưa có
     if not os.path.exists(PDF_DIR):
         os.makedirs(PDF_DIR)
-        print(f"📁 Đã tạo thư mục {PDF_DIR}. Hãy copy các file PDF vào đây.")
+        print(f"📁 Created {PDF_DIR}")
         exit(0)
 
     pdf_files = list(Path(PDF_DIR).glob("*.pdf"))
     if not pdf_files:
-        print("⚠️ Không tìm thấy file PDF nào trong thư mục 'pdfs'.")
+        print("⚠️ No PDF found.")
         exit(0)
 
-    embed_fn     = VietnameseEmbeddingFunction()
+    embed_fn = VietnameseEmbeddingFunction()
     chroma_client = chromadb.PersistentClient(path=PERSIST_DIR)
 
     text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=2000,
-        chunk_overlap=400,
-        length_function=len,
-        separators=["\n\n", "\n", ". ", "; ", " ", ""],
+        chunk_size=1500,
+        chunk_overlap=300,
     )
 
     for pdf_file in sorted(pdf_files):
         col_name = get_collection_name(str(pdf_file))
 
-        # Bỏ qua nếu collection đã tồn tại
         existing_cols = [c.name for c in chroma_client.list_collections()]
         if col_name in existing_cols:
-            print(f"✅ Bỏ qua (đã tồn tại): {pdf_file.name}")
+            print(f"✅ Skip: {pdf_file.name}")
             continue
 
-        print(f"\n🔄 Đang xử lý: {pdf_file.name}")
+        print(f"\n🔄 Processing: {pdf_file.name}")
 
-        # Load PDF
         try:
             loader = PDFPlumberLoader(str(pdf_file))
-            docs   = loader.load()
+            docs = loader.load()
         except Exception as e:
-            print(f"⚠️ Lỗi đọc PDF {pdf_file.name}: {e}")
+            print(f"❌ PDF error: {e}")
             continue
 
-        if not docs:
-            print(f"⚠️ Không đọc được nội dung: {pdf_file.name}")
-            continue
-
-        print(f"   📄 Số trang: {len(docs)}")
-
-        # Chia chunk
         chunks = text_splitter.split_documents(docs)
-        if not chunks:
-            print(f"⚠️ Không tạo được chunk nào từ {pdf_file.name}")
-            continue
 
-        print(f"   ✂️  Số chunk: {len(chunks)}")
-        print(f"   📝 Mẫu chunk đầu: {chunks[0].page_content[:200]}...")
-
-        # Tạo collection & lưu vào ChromaDB
         try:
             collection = chroma_client.create_collection(
                 name=col_name,
                 embedding_function=embed_fn,
             )
-            collection.add(
-                documents=[c.page_content for c in chunks],
-                ids=[f"chunk_{i}" for i in range(len(chunks))],
-                metadatas=[
-                    {
-                        "source":   pdf_file.name,
-                        "page":     c.metadata.get("page", 0),
-                        "chunk_id": i,
-                    }
-                    for i, c in enumerate(chunks)
-                ],
-            )
-            print(f"   ✅ Đã thêm {len(chunks)} đoạn vào collection '{col_name}'")
+
+            # 🔥 ADD BATCH (QUAN TRỌNG)
+            batch_size = 100
+
+            for i in range(0, len(chunks), batch_size):
+                batch = chunks[i:i + batch_size]
+
+                collection.add(
+                    documents=[c.page_content for c in batch],
+                    ids=[f"chunk_{i+j}" for j in range(len(batch))],
+                    metadatas=[
+                        {
+                            "source": pdf_file.name,
+                            "page": c.metadata.get("page", 0),
+                        }
+                        for c in batch
+                    ],
+                )
+
+            print(f"✅ Added {len(chunks)} chunks")
+
         except Exception as e:
-            print(f"❌ Lỗi lưu ChromaDB cho {pdf_file.name}: {e}")
-            # Xóa collection lỗi nếu đã tạo dở
+            print(f"❌ Chroma error: {e}")
             try:
                 chroma_client.delete_collection(col_name)
-            except Exception:
+            except:
                 pass
 
-    print("\n🎉 Hoàn tất xây dựng DB!")
+    print("\n🎉 DONE!")

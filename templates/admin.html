@@ -4,12 +4,8 @@
   <meta charset="UTF-8">
   <title>Hệ thống Quản trị - HPCBANVE</title>
   <style>
-    /* ĐỒNG BỘ FONT CHỮ TIMES NEW ROMAN */
     * { box-sizing: border-box; margin: 0; padding: 0; font-family: "Times New Roman", Times, serif; }
-    
     body { background: #f0f2f5; color: #202124; line-height: 1.6; }
-    
-    /* HEADER ĐỒNG BỘ VỚI TRANG CHỦ */
     header { 
         background: linear-gradient(135deg, #1a73e8, #0d47a1); 
         color: white; 
@@ -32,10 +28,7 @@
         transition: all 0.3s;
     }
     header a:hover { background: rgba(255,255,255,0.25); border-color: white; }
-    
     .container { max-width: 1200px; margin: 32px auto; padding: 0 24px; }
-    
-    /* THÔNG BÁO FLASH */
     .flash { 
         background: #e6f4ea; 
         color: #137333; 
@@ -46,7 +39,6 @@
         border-left: 5px solid #34a853;
         box-shadow: 0 2px 5px rgba(0,0,0,0.05);
     }
-    
     section { 
         background: white; 
         border-radius: 12px; 
@@ -61,8 +53,6 @@
         padding-bottom: 10px; 
         border-bottom: 2px solid #f0f2f5; 
     }
-    
-    /* BUTTONS */
     .btn { 
         display: inline-block; 
         padding: 10px 20px; 
@@ -79,7 +69,6 @@
     .btn-primary:hover { background: #1558b0; transform: translateY(-1px); }
     .btn-danger  { background: #d93025; color: white; }
     .btn-danger:hover  { background: #a50e0e; transform: translateY(-1px); }
-    
     .btn-outline { 
         background: #f8f9fa; 
         color: #555; 
@@ -88,8 +77,6 @@
         border-radius: 6px;
     }
     .btn-outline:hover { background: #fee8e7; color: #d93025; border-color: #d93025; }
-    
-    /* PDF TAGS */
     .pdf-list { display: flex; flex-wrap: wrap; gap: 10px; }
     .pdf-tag { 
         background: #e8f0fe; 
@@ -100,8 +87,6 @@
         font-weight: bold; 
         border: 1px solid #c2d7ff; 
     }
-    
-    /* TABLE STYLES */
     table { width: 100%; border-collapse: collapse; font-size: 15px; margin-top: 10px; }
     th { 
         text-align: left; 
@@ -113,7 +98,6 @@
     }
     td { padding: 15px 12px; border-bottom: 1px solid #f0f0f0; vertical-align: top; }
     tr:hover td { background: #fcfdfe; }
-    
     .q { color: #1a73e8; font-weight: bold; margin-bottom: 6px; line-height: 1.4; font-size: 15px; }
     .meta { color: #70757a; font-size: 12px; margin-top: 4px; }
     .answer-preview { 
@@ -128,94 +112,87 @@
   </style>
 </head>
 <body>
-  <header>
-    <h1>⚙️ Hệ thống Quản trị - HPCBANVE</h1>
-    <div class="nav-links">
-      <a href="{{ url_for('home') }}">🏠 Trang chủ</a>
-      <a href="{{ url_for('admin_logout') }}" style="background: #d93025;">Đăng xuất</a>
-    </div>
-  </header>
-
-  <div class="container">
-    {% with messages = get_flashed_messages() %}
-      {% if messages %}
-        {% for message in messages %}
-          <div class="flash">{{ message }}</div>
-        {% endfor %}
-      {% endif %}
-    {% endwith %}
-
-    <section>
-      <h2>📚 Danh sách quy trình đang hoạt động ({{ pdf_list|length }})</h2>
-      {% if pdf_list %}
-        <div class="pdf-list">
-          {% for pdf in pdf_list %}
-            <span class="pdf-tag">📄 {{ pdf.name }}</span>
-          {% endfor %}
-        </div>
-      {% else %}
-        <p style="color:#70757a; font-style: italic;">Hệ thống chưa nhận diện được bộ chỉ mục (Collection). Admin vui lòng kiểm tra thư mục chroma_db.</p>
-      {% endif %}
-      
-      <div style="margin-top:25px; padding-top:20px; border-top: 1px dashed #ddd;">
-        <form method="POST" action="{{ url_for('admin_refresh') }}">
-          <button class="btn btn-primary" type="submit">🔄 Làm mới danh sách quy trình</button>
-          <p style="font-size: 12px; color: #70757a; margin-top: 10px;">*Nhấn để cập nhật lại dữ liệu nếu bạn vừa thêm file PDF mới vào hệ thống hoặc thay đổi cấu trúc dữ liệu.</p>
-        </form>
-      </div>
-    </section>
-
-    <section>
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-        <h2>📜 Lịch sử hỏi đáp mới nhất</h2>
-        <form method="POST" action="{{ url_for('admin_delete_history_all') }}"
-              onsubmit="return confirm('CẢNH BÁO: Hành động này sẽ xóa vĩnh viễn toàn bộ lịch sử hỏi đáp. Bạn chắc chắn muốn tiếp tục?')">
-          <button class="btn btn-danger" type="submit">🗑 Xóa sạch lịch sử</button>
-        </form>
-      </div>
-
-      {% if history %}
-      <table>
-        <thead>
-          <tr>
-            <th style="width: 60px;">ID</th>
-            <th style="width: 30%;">Câu hỏi</th>
-            <th style="width: 40%;">Nội dung trả lời</th>
-            <th>Thông tin & Thời gian</th>
-            <th style="width: 70px; text-align: center;">Thao tác</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for row in history %}
-          <tr>
-            <td><span style="color:#9aa0a6; font-weight: bold;">#{{ row.id }}</span></td>
-            <td>
-              <div class="q">{{ row.question }}</div>
-            </td>
-            <td>
-              <div class="answer-preview">{{ row.answer | striptags }}</div>
-            </td>
-            <td>
-              <div class="meta">📅 <b>Thời gian:</b> {{ row.timestamp[:16].replace('T',' ') }}</div>
-              <div class="meta" style="color:#1a73e8">📂 <b>Bộ nguồn:</b> {{ row.collection_name }}</div>
-            </td>
-            <td style="text-align: center;">
-              <form method="POST"
-                    action="{{ url_for('admin_delete_history', history_id=row.id) }}"
-                    onsubmit="return confirm('Xóa câu hỏi này khỏi lịch sử?')">
-                <button class="btn btn-outline" type="submit" title="Xóa bản ghi">🗑</button>
-              </form>
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-      {% else %}
-      <div style="text-align: center; padding: 60px; color: #70757a;">
-        <p style="font-size: 16px;">Chưa có dữ liệu lịch sử hỏi đáp nào được ghi nhận.</p>
-      </div>
-      {% endif %}
-    </section>
+<header>
+  <h1>⚙️ Hệ thống Quản trị - HPCBANVE</h1>
+  <div class="nav-links">
+    <a href="{{ url_for('home') }}">🏠 Trang chủ</a>
+    <a href="{{ url_for('admin_logout') }}" style="background: #d93025;">Đăng xuất</a>
   </div>
+</header>
+<div class="container">
+  {% with messages = get_flashed_messages() %}
+    {% if messages %}
+      {% for message in messages %}
+        <div class="flash">{{ message }}</div>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+
+  <section>
+    <h2>📚 Danh sách quy trình đang hoạt động ({{ pdf_list|length }})</h2>
+    {% if pdf_list %}
+      <div class="pdf-list">
+        {% for pdf in pdf_list %}
+          <span class="pdf-tag">📄 {{ pdf.name }}</span>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p style="color:#70757a; font-style: italic;">Hệ thống chưa nhận diện được bộ chỉ mục (Collection). Admin vui lòng upload PDF và rebuild.</p>
+    {% endif %}
+
+    <div style="margin-top:25px; padding-top:20px; border-top: 1px dashed #ddd;">
+      <form method="POST" action="{{ url_for('admin_refresh') }}" style="display: inline-block; margin-right: 15px;">
+        <button class="btn btn-primary" type="submit">🔄 Làm mới danh sách quy trình</button>
+      </form>
+      <form method="POST" action="{{ url_for('admin_rebuild') }}" style="display: inline-block; margin-right: 15px;"
+            onsubmit="return confirm('Rebuild sẽ xử lý lại tất cả PDF trong thư mục pdfs. Quá trình này có thể mất vài phút. Tiếp tục?')">
+        <button class="btn btn-primary" style="background: #e8710a;" type="submit">🔨 Rebuild Database (từ PDF)</button>
+      </form>
+    </div>
+
+    <div style="margin-top: 20px; background: #f8f9fa; padding: 15px; border-radius: 12px;">
+      <form method="POST" action="{{ url_for('admin_upload_pdf') }}" enctype="multipart/form-data">
+        <label style="font-weight: bold;">📎 Upload PDF mới:</label>
+        <input type="file" name="file" accept=".pdf" required style="margin: 10px 0; display: block;">
+        <button class="btn btn-primary" type="submit">⬆️ Tải lên</button>
+        <p class="meta" style="font-size: 12px; margin-top: 8px;">*Sau khi upload, nhấn "Rebuild Database" để cập nhật hệ thống.</p>
+      </form>
+    </div>
+  </section>
+
+  <section>
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+      <h2>📜 Lịch sử hỏi đáp mới nhất</h2>
+      <form method="POST" action="{{ url_for('admin_delete_history_all') }}"
+            onsubmit="return confirm('CẢNH BÁO: Hành động này sẽ xóa vĩnh viễn toàn bộ lịch sử hỏi đáp. Bạn chắc chắn muốn tiếp tục?')">
+        <button class="btn btn-danger" type="submit">🗑 Xóa sạch lịch sử</button>
+      </form>
+    </div>
+    {% if history %}
+    <table>
+      <thead>
+        <tr><th style="width: 60px;">ID</th><th style="width: 30%;">Câu hỏi</th><th style="width: 40%;">Nội dung trả lời</th><th>Thông tin & Thời gian</th><th style="width: 70px; text-align: center;">Thao tác</th></tr>
+      </thead>
+      <tbody>
+        {% for row in history %}
+        <tr>
+          <td><span style="color:#9aa0a6; font-weight: bold;">#{{ row.id }}</span></td>
+          <td><div class="q">{{ row.question }}</div></td>
+          <td><div class="answer-preview">{{ row.answer | striptags }}</div></td>
+          <td><div class="meta">📅 <b>Thời gian:</b> {{ row.timestamp[:16].replace('T',' ') }}</div><div class="meta" style="color:#1a73e8">📂 <b>Bộ nguồn:</b> {{ row.collection_name }}</div></td>
+          <td style="text-align: center;">
+            <form method="POST" action="{{ url_for('admin_delete_history', history_id=row.id) }}" onsubmit="return confirm('Xóa câu hỏi này khỏi lịch sử?')">
+              <button class="btn btn-outline" type="submit" title="Xóa bản ghi">🗑</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div style="text-align: center; padding: 60px; color: #70757a;"><p>Chưa có dữ liệu lịch sử hỏi đáp nào.</p></div>
+    {% endif %}
+  </section>
+</div>
 </body>
 </html>
