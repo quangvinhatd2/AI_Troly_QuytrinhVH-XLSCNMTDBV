@@ -56,7 +56,7 @@ app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
 # TRẠNG THÁI KHỞI ĐỘNG
 # =============================================================
 _app_ready      = False
-_warmup_status  = "Đang khởi động..."
+_warmup_status  = "Đang chuẩn bị..."
 
 # =============================================================
 # DB POOL
@@ -99,6 +99,7 @@ def get_embed_fn():
         from sentence_transformers import SentenceTransformer
         from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
         logger.info("Load SentenceTransformer...")
+        # Sử dụng model nhỏ hơn để tránh Out of Memory trên Render Free
         _model = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
         _model.max_seq_length = 256
 
@@ -489,30 +490,63 @@ def ask_llm(question: str, collection_name: str) -> str:
 # ROUTES NGƯỜI DÙNG
 # =============================================================
 
-# --- FIX: Ping endpoint cho UptimeRobot ---
 @app.route("/ping")
 def ping():
     return "pong", 200
 
-# --- FIX: Endpoint kiểm tra trạng thái warm-up ---
 @app.route("/ready")
 def ready():
     return jsonify({"ready": _app_ready, "status": _warmup_status})
 
+def get_loading_html():
+    return """<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <title>Đang khởi động...</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Segoe UI', sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; background: #f0f4f8; color: #333; }
+        .card { background: white; border-radius: 16px; padding: 48px 40px; text-align: center; box-shadow: 0 4px 24px rgba(0,0,0,0.08); max-width: 400px; width: 90%; }
+        .spinner { width: 56px; height: 56px; border: 5px solid #e2e8f0; border-top-color: #3b82f6; border-radius: 50%; animation: spin 0.9s linear infinite; margin: 0 auto 24px; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        h2 { font-size: 1.25rem; margin-bottom: 10px; color: #1e293b; }
+        p  { font-size: 0.9rem; color: #64748b; line-height: 1.5; }
+        .status { margin-top: 20px; padding: 10px 16px; background: #f1f5f9; border-radius: 8px; font-size: 0.82rem; color: #475569; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="spinner"></div>
+        <h2>⚙️ Hệ thống đang khởi động</h2>
+        <p>Vui lòng chờ trong giây lát để AI nạp tài liệu kỹ thuật...</p>
+        <div class="status" id="status-text">Đang chuẩn bị...</div>
+    </div>
+    <script>
+        async function checkReady() {
+            try {
+                const res = await fetch('/ready');
+                const data = await res.json();
+                document.getElementById('status-text').textContent = data.status;
+                if (data.ready) { window.location.reload(); }
+                else { setTimeout(checkReady, 3000); }
+            } catch { setTimeout(checkReady, 3000); }
+        }
+        checkReady();
+    </script>
+</body>
+</html>"""
+
 @app.route("/")
 def home():
     global _app_ready, _warmup_status
-    
-    # Nếu chưa ready và chưa có luồng nào đang chạy, thì mới kích hoạt warmup
     if not _app_ready:
-        # Kiểm tra xem có đang trong quá trình tải không để tránh chạy trùng
-        if _warmup_status == "Đang khởi động...":
-            _warmup_status = "Đang bắt đầu tiến trình nạp mô hình..."
+        if _warmup_status == "Đang chuẩn bị...":
+            _warmup_status = "Khởi chạy tiến trình nạp AI..."
+            logger.info("🚀 Kích hoạt Warm-up từ request đầu tiên.")
             threading.Thread(target=_warmup, daemon=True).start()
-            
-        return render_template_loading() # Trả về giao diện loading (đoạn html dài của bạn)
+        return get_loading_html(), 503
 
-    # Nếu đã ready thì vào trang chủ bình thường
     pdf_list  = get_collection_names_only()
     pdf_files = get_pdf_files()
     return render_template("index.html", pdf_list=pdf_list, pdf_files=pdf_files)
@@ -565,21 +599,18 @@ def download_pdf(filename):
     )
 
 # =============================================================
-# WARM-UP — FIX: bỏ time.sleep(5), cập nhật _warmup_status
+# WARM-UP — Lazy Load
 # =============================================================
 def _warmup():
     global _app_ready, _warmup_status
     logger.info("Warm-up: bắt đầu...")
     try:
-        # 1. Kiểm tra kết nối DB trước (nhanh nhất)
         _warmup_status = "Đang kiểm tra cơ sở dữ liệu..."
         ensure_db_pool()
         
-        # 2. Load Collections (ChromaDB)
         _warmup_status = "Đang kết nối thư viện tài liệu..."
         get_pdf_collections()
 
-        # 3. Load Embedding (Đây là bước nặng nhất, dễ treo nhất)
         _warmup_status = "Đang tải bộ não AI (Embedding)..."
         get_embed_fn()
 
@@ -588,9 +619,8 @@ def _warmup():
         logger.info("✅ Warm-up hoàn tất!")
     except Exception as e:
         logger.error(f"❌ Warm-up thất bại: {e}")
-        # Ép buộc sẵn sàng dù lỗi để Admin có thể vào sửa/rebuild
         _app_ready = True 
-        _warmup_status = f"Khởi động có lỗi: {str(e)[:50]}"
+        _warmup_status = f"Lỗi: {str(e)[:40]}"
 
 # =============================================================
 # KHỞI ĐỘNG
@@ -600,8 +630,6 @@ try:
     init_history_db()
 except Exception as e:
     logger.error(f"Lỗi khởi tạo DB: {e}")
-
-# threading.Thread(target=_warmup, daemon=True).start()
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
