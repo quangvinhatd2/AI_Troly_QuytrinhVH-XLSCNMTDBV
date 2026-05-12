@@ -911,7 +911,7 @@ def home():
         with _warmup_lock:
             if not _warmup_started:
                 _warmup_started = True
-                _warmup_status = "Kết nối Database và tải model embedding..."
+                _warmup_status = "Kết nối Database và quét danh mục tài liệu..."
                 threading.Thread(target=_warmup, daemon=True).start()
         return get_loading_html(), 503
     return render_template("index.html", pdf_list=get_collection_names_only(), pdf_files=get_pdf_files())
@@ -970,13 +970,15 @@ def _warmup():
     try:
         _warmup_status = "Đang mở CSDL..."
         ensure_db_pool()
-        _warmup_status = "Đang tải model embedding local..."
-        get_embed_fn()
+        # Không tải SentenceTransformer/PyTorch ở đây — trên Render free rất dễ treo/OOM vài phút.
+        # Model embedding chỉ cần khi query Chroma; sẽ lazy-load trong get_embed_fn() lần đầu hỏi.
         _warmup_status = "Đang quét danh mục tài liệu..."
-        get_pdf_collections()
+        get_collection_names_only()
         _app_ready = True
         _warmup_status = "Sẵn sàng!"
-        logger.info("✅ Warm-up hoàn tất với embedding local!")
+        logger.info(
+            "✅ Warm-up xong (DB + Chroma). Embedding local tải khi có câu hỏi hoặc vào admin đầu tiên)."
+        )
     except Exception as e:
         logger.error(f"❌ Warm-up lỗi: {e}")
         _app_ready = False
