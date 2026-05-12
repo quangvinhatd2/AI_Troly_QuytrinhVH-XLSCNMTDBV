@@ -3,7 +3,8 @@ services:
     name: ai-thuydien
     runtime: python
     plan: free
-    buildCommand: pip install -r requirements.txt
+    # Cài PyTorch CPU trước (wheel chuẩn) giúp pip bớt đoán version; phần còn lại vẫn nặng do torch + chromadb.
+    buildCommand: pip install --upgrade pip setuptools wheel && pip install torch --index-url https://download.pytorch.org/whl/cpu && pip install -r requirements.txt
     startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --threads 2 --timeout 180
     healthCheckPath: /ready
     envVars:

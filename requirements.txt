@@ -1,11 +1,12 @@
+# Runtime cho app + build_db. Gói nặng nhất: torch (qua sentence-transformers) — build Render thường 15–40 phút lần đầu.
 chromadb
 flask
 python-dotenv
 google-genai
 sentence-transformers
-langchain
+# Chỉ cần các gói con (không cài meta-package langchain đầy đủ → ít dependency hơn).
+langchain-text-splitters
 langchain-community
-pypdf
 pdfplumber
 gunicorn
 psycopg2-binary
