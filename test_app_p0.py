@@ -36,6 +36,9 @@ class P0StaticGuardTests(unittest.TestCase):
         self.assertIn("check_password_hash(ADMIN_PASSWORD_HASH, raw_password)", self.source)
         self.assertIn("if ADMIN_PASSWORD_HASH:", self.source)
 
+    def test_admin_secret_requires_password_or_hash(self):
+        self.assertIn("not ADMIN_PASSWORD and not ADMIN_PASSWORD_HASH", self.source)
+
     def test_free_only_mode_defaults_are_present(self):
         self.assertIn('FREE_ONLY_MODE = os.getenv("FREE_ONLY_MODE", "true")', self.source)
         self.assertIn('ALLOW_OPENROUTER_IN_FREE_MODE = os.getenv("ALLOW_OPENROUTER_IN_FREE_MODE", "false")', self.source)

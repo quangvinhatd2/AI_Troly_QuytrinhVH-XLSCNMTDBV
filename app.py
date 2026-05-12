@@ -17,9 +17,6 @@ import requests
 import concurrent.futures
 from werkzeug.security import check_password_hash
 
-# Embedding local
-from sentence_transformers import SentenceTransformer
-
 load_dotenv()
 
 # =============================================================
@@ -48,9 +45,13 @@ PERSIST_DIR = "./chroma_db_gemini"
 PDF_DIR = "./pdfs"
 
 missing = []
-if not DATABASE_URL: missing.append("DATABASE_URL")
-if not ADMIN_PASSWORD: missing.append("ADMIN_PASSWORD")
-if not SECRET_KEY: missing.append("SECRET_KEY")
+if not DATABASE_URL:
+    missing.append("DATABASE_URL")
+# Cho phép chỉ dùng hash (Render nên dùng ADMIN_PASSWORD_HASH, không bắt buộc ADMIN_PASSWORD thuần).
+if not ADMIN_PASSWORD and not ADMIN_PASSWORD_HASH:
+    missing.append("ADMIN_PASSWORD hoặc ADMIN_PASSWORD_HASH")
+if not SECRET_KEY:
+    missing.append("SECRET_KEY")
 if not GROQ_API_KEY and not OPENROUTER_API_KEY and not GEMINI_API_KEYS:
     missing.append("(GROQ hoặc OPENROUTER hoặc GEMINI) API Key")
 
@@ -158,10 +159,11 @@ def ensure_db_pool():
             db_pool = psycopg2.pool.ThreadedConnectionPool(
                 1, 10,
                 dsn=DATABASE_URL,
+                connect_timeout=10,
                 keepalives=1,
                 keepalives_idle=30,
                 keepalives_interval=10,
-                keepalives_count=5
+                keepalives_count=5,
             )
             logger.info("✅ DB Pool initialized")
         except Exception as e:
@@ -201,6 +203,9 @@ from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
 
 class LocalEmbedFn(EmbeddingFunction):
     def __init__(self, model_name: str = "paraphrase-multilingual-MiniLM-L12-v2"):
+        # Lazy import: tránh nạp torch/sentence_transformers khi import app (giảm RAM & lỗi OOM trên Render free).
+        from sentence_transformers import SentenceTransformer
+
         self.model = SentenceTransformer(model_name)
         logger.info(f"✅ Loaded local embedding model: {model_name}")
 
@@ -605,13 +610,7 @@ def build_prompt(question: str, chunks: list, response_level: int = 3) -> str:
 ## TRẢ LỜI:"""
 
 # =============================================================
-# LLM PROVIDERS – FALLBACK TỰ ĐỘNG
-# =============================================================
-
-import concurrent.futures
-
-# =============================================================
-# LLM PROVIDERS – SONG SONG (PARALLEL FALLBACK)
+# LLM PROVIDERS – FALLBACK TỰ ĐỘNG / SONG SONG (PARALLEL FALLBACK)
 # =============================================================
 
 class PayloadTooLargeError(Exception):
