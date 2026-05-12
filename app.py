@@ -6,6 +6,7 @@ import threading
 from contextlib import contextmanager
 from functools import wraps
 from datetime import datetime
+from datetime import timedelta
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -13,6 +14,8 @@ from psycopg2 import pool
 from flask import Flask, render_template, request, jsonify, redirect, url_for, session, flash, send_from_directory
 from dotenv import load_dotenv
 import requests
+import concurrent.futures
+from werkzeug.security import check_password_hash
 
 # Embedding local
 from sentence_transformers import SentenceTransformer
@@ -38,6 +41,9 @@ OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 DATABASE_URL = os.getenv("DATABASE_URL")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD")
 SECRET_KEY = os.getenv("SECRET_KEY")
+ADMIN_PASSWORD_HASH = os.getenv("ADMIN_PASSWORD_HASH", "").strip()
+FREE_ONLY_MODE = os.getenv("FREE_ONLY_MODE", "true").strip().lower() in ("1", "true", "yes", "on")
+ALLOW_OPENROUTER_IN_FREE_MODE = os.getenv("ALLOW_OPENROUTER_IN_FREE_MODE", "false").strip().lower() in ("1", "true", "yes", "on")
 PERSIST_DIR = "./chroma_db_gemini"
 PDF_DIR = "./pdfs"
 
@@ -56,12 +62,25 @@ if missing:
 app = Flask(__name__)
 app.secret_key = SECRET_KEY
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(minutes=30)
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_SECURE"] = bool(os.environ.get("RENDER"))
+
+if os.environ.get("RENDER") and not ADMIN_PASSWORD_HASH:
+    logger.warning("Nên cấu hình ADMIN_PASSWORD_HASH trên production để tránh lưu mật khẩu thô.")
+if FREE_ONLY_MODE:
+    logger.info("FREE_ONLY_MODE đang bật: chỉ dùng luồng provider miễn phí an toàn.")
 
 # =============================================================
 # RATE LIMIT AN TOÀN ĐA LUỒNG
 # =============================================================
 _last_request = {}
 _rate_limit_lock = threading.Lock()
+_admin_login_attempts = {}
+_admin_login_lock = threading.Lock()
+_ADMIN_MAX_ATTEMPTS = 5
+_ADMIN_LOCKOUT_SECONDS = 600
 
 def rate_limit(ip):
     with _rate_limit_lock:
@@ -70,6 +89,54 @@ def rate_limit(ip):
             return False
         _last_request[ip] = now
         return True
+
+def _is_locked_admin_ip(ip: str) -> tuple[bool, int]:
+    if not ip:
+        ip = "unknown"
+    with _admin_login_lock:
+        state = _admin_login_attempts.get(ip)
+        if not state:
+            return False, 0
+        lock_until = state.get("lock_until", 0)
+        now = time.time()
+        if lock_until > now:
+            return True, int(lock_until - now)
+        if lock_until and lock_until <= now:
+            _admin_login_attempts.pop(ip, None)
+        return False, 0
+
+def _record_admin_login_failure(ip: str):
+    if not ip:
+        ip = "unknown"
+    with _admin_login_lock:
+        now = time.time()
+        state = _admin_login_attempts.get(ip, {"count": 0, "lock_until": 0})
+        if state.get("lock_until", 0) > now:
+            return
+        state["count"] = state.get("count", 0) + 1
+        if state["count"] >= _ADMIN_MAX_ATTEMPTS:
+            state["lock_until"] = now + _ADMIN_LOCKOUT_SECONDS
+            state["count"] = 0
+        _admin_login_attempts[ip] = state
+
+def _clear_admin_login_failures(ip: str):
+    if not ip:
+        ip = "unknown"
+    with _admin_login_lock:
+        _admin_login_attempts.pop(ip, None)
+
+def verify_admin_password(raw_password: str) -> bool:
+    if not raw_password:
+        return False
+    if ADMIN_PASSWORD_HASH:
+        try:
+            return check_password_hash(ADMIN_PASSWORD_HASH, raw_password)
+        except Exception as e:
+            logger.error(f"Lỗi verify ADMIN_PASSWORD_HASH: {e}")
+            return False
+    if ADMIN_PASSWORD:
+        return raw_password == ADMIN_PASSWORD
+    return False
 
 # =============================================================
 # TRẠNG THÁI KHỞI ĐỘNG
@@ -215,11 +282,20 @@ def admin_required(f):
 
 @app.route("/admin/login", methods=["GET", "POST"])
 def admin_login():
+    ip = request.remote_addr or "unknown"
+    locked, remain = _is_locked_admin_ip(ip)
+    if locked and request.method == "POST":
+        mins = max(1, remain // 60)
+        flash(f"❌ Đăng nhập sai quá nhiều lần. Thử lại sau khoảng {mins} phút.")
+        return render_template("admin_login.html")
+
     if request.method == "POST":
-        if request.form.get("password") == ADMIN_PASSWORD:
+        if verify_admin_password(request.form.get("password", "")):
             session.permanent = True
             session["is_admin"] = True
+            _clear_admin_login_failures(ip)
             return redirect(url_for("admin_dashboard"))
+        _record_admin_login_failure(ip)
         flash("❌ Sai mật khẩu quản trị!")
     return render_template("admin_login.html")
 
@@ -447,8 +523,24 @@ def retrieve_with_metadata(question: str, collection_name: str, k: int = 30):
             })
 
         chunks.sort(key=lambda x: x["relevance_score"], reverse=True)
-        good = [c for c in chunks if c["relevance_score"] > 0.25 and len(c["content"]) > 80]
-        return (good[:20] if good else chunks[:20])
+
+        deduped = []
+        seen = set()
+        for c in chunks:
+            compact = " ".join(c["content"].split())
+            sig = (c["source"], c["page"], compact[:240])
+            if sig in seen:
+                continue
+            seen.add(sig)
+            deduped.append(c)
+
+        # Câu hỏi "liệt kê/tất cả" cần recall cao hơn; câu hỏi thường ưu tiên precision.
+        list_keywords = ("liệt kê", "tất cả", "các loại", "những loại", "gồm những", "bao gồm")
+        is_list_query = any(kw in question.lower() for kw in list_keywords)
+        threshold = 0.2 if is_list_query else 0.3
+        min_len = 60 if is_list_query else 80
+        good = [c for c in deduped if c["relevance_score"] >= threshold and len(c["content"]) >= min_len]
+        return (good[:20] if good else deduped[:20])
     except Exception as e:
         logger.error(f"Lỗi ChromaDB: {e}")
         return []
@@ -456,7 +548,7 @@ def retrieve_with_metadata(question: str, collection_name: str, k: int = 30):
 def format_citations(text: str) -> str:
     return text
 
-def build_prompt(question: str, chunks: list) -> str:
+def build_prompt(question: str, chunks: list, response_level: int = 3) -> str:
     context = "\n\n".join(
         f"[{i}] Nguồn: {c['source']}, Trang {c['page']}\n{c['content']}"
         for i, c in enumerate(chunks, 1)
@@ -474,6 +566,18 @@ def build_prompt(question: str, chunks: list) -> str:
 - Mỗi nhóm dùng tiêu đề **in đậm**, mỗi mục dùng dấu gạch đầu dòng ( - ).
 """
 
+    level_instruction = """
+6. **Mức trả lời chi tiết** — Trả lời đầy đủ, có phân nhóm và giải thích ngắn cho từng ý.
+"""
+    if response_level == 1:
+        level_instruction = """
+6. **Mức trả lời ngắn gọn** — Trả lời trong 3-5 gạch đầu dòng, ưu tiên ý chính, chỉ giữ trích dẫn quan trọng.
+"""
+    elif response_level == 2:
+        level_instruction = """
+6. **Mức trả lời trung bình** — Trả lời có cấu trúc ngắn gọn, nêu đủ thông số cốt lõi và trích dẫn theo từng nhóm ý.
+"""
+
     return f"""Bạn là trợ lý phân tích tài liệu kỹ thuật. Hãy trả lời câu hỏi dựa trên dữ liệu bên dưới, theo phong cách của NotebookLM.
 
 ## QUY TẮC ĐỊNH DẠNG (bắt buộc tuân theo):
@@ -489,6 +593,7 @@ def build_prompt(question: str, chunks: list) -> str:
 4. **Ngôn ngữ** — Viết tự nhiên như chuyên gia giải thích, không cứng nhắc. Giữ nguyên thuật ngữ kỹ thuật tiếng Việt từ tài liệu.
 
 5. **Đầy đủ** — Không tóm tắt sơ sài. Liệt kê đủ thông số, điều kiện, thời gian tác động nếu có trong dữ liệu.
+{level_instruction}
 {extra}
 
 ## DỮ LIỆU THAM KHẢO:
@@ -501,6 +606,12 @@ def build_prompt(question: str, chunks: list) -> str:
 
 # =============================================================
 # LLM PROVIDERS – FALLBACK TỰ ĐỘNG
+# =============================================================
+
+import concurrent.futures
+
+# =============================================================
+# LLM PROVIDERS – SONG SONG (PARALLEL FALLBACK)
 # =============================================================
 
 class PayloadTooLargeError(Exception):
@@ -523,62 +634,61 @@ def reduce_prompt_chunks(original_prompt: str, keep_chunks: int) -> str:
             new_lines.append(line)
     return '\n'.join(new_lines)
 
-def call_openrouter(prompt: str, timeout: int = 90) -> str | None:
+def call_openrouter(prompt: str, timeout: int = 60) -> str | None:
+    # Mặc định không dùng OpenRouter trong chế độ free-only để tránh rủi ro tính phí.
+    if FREE_ONLY_MODE and not ALLOW_OPENROUTER_IN_FREE_MODE:
+        return None
     if not OPENROUTER_API_KEY:
         return None
-    models = [
-        "openrouter/free",
-    ]
+    try:
+        print(f"🟡 [OpenRouter] Bắt đầu gọi...")
+        resp = requests.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                "Content-Type": "application/json",
+                "HTTP-Referer": "http://localhost:5000",
+                "X-Title": "RAG_NotebookLM"
+            },
+            json={
+                "model": "openrouter/auto",  # Tự chọn model tốt nhất available
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.1,
+                "max_tokens": 4096
+            },
+            timeout=timeout
+        )
+        if resp.status_code == 200:
+            content = resp.json()["choices"][0]["message"]["content"]
+            if content and len(content.strip()) > 50:
+                print(f"✅ [OpenRouter] Thành công")
+                return content
+        else:
+            print(f"❌ [OpenRouter] Lỗi {resp.status_code}")
+    except Exception as e:
+        print(f"❌ [OpenRouter] Exception: {e}")
+    return None
+
+def call_groq(prompt: str, timeout: int = 45) -> str | None:
+    if not GROQ_API_KEY:
+        return None
+    # Chỉ thử 1 model mỗi lần gọi song song để không block lâu
+    models = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "qwen/qwen3-32b"]
     for model in models:
         try:
-            print(f"🟡 [OpenRouter] Thử model {model}...")
+            print(f"🟡 [Groq] Thử {model}...")
             resp = requests.post(
-                "https://openrouter.ai/api/v1/chat/completions",
+                "https://api.groq.com/openai/v1/chat/completions",
                 headers={
-                    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                    "Content-Type": "application/json",
-                    "HTTP-Referer": "http://localhost:5000",
-                    "X-Title": "RAG_NotebookLM"
+                    "Authorization": f"Bearer {GROQ_API_KEY}",
+                    "Content-Type": "application/json"
                 },
                 json={
                     "model": model,
                     "messages": [{"role": "user", "content": prompt}],
                     "temperature": 0.1,
-                    "max_tokens": 4096
+                    "max_tokens": 8192
                 },
-                timeout=timeout
-            )
-            if resp.status_code == 200:
-                content = resp.json()["choices"][0]["message"]["content"]
-                if content and len(content.strip()) > 50:
-                    print(f"✅ [OpenRouter] Thành công với {model}")
-                    return content
-            elif resp.status_code == 429:
-                print(f"⚠️ [OpenRouter] Rate limit {model}, chuyển model khác")
-                continue
-            else:
-                print(f"❌ [OpenRouter] Lỗi {resp.status_code}: {resp.text[:100]}")
-        except Exception as e:
-            print(f"❌ [OpenRouter] Exception {model}: {e}")
-    return None
-
-def call_groq(prompt: str, timeout: int = 60) -> str | None:
-    if not GROQ_API_KEY:
-        return None
-    models = [
-        "llama-3.3-70b-versatile",
-        "llama-3.1-8b-instant",
-        "qwen/qwen3-32b"
-    ]
-    all_413 = True
-    for model in models:
-        try:
-            print(f"🟡 [Groq] Thử model {model}...")
-            resp = requests.post(
-                "https://api.groq.com/openai/v1/chat/completions",
-                headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
-                json={"model": model, "messages": [{"role": "user", "content": prompt}],
-                      "temperature": 0.1, "max_tokens": 8192},
                 timeout=timeout
             )
             if resp.status_code == 200:
@@ -586,26 +696,19 @@ def call_groq(prompt: str, timeout: int = 60) -> str | None:
                 if content and len(content.strip()) > 50:
                     print(f"✅ [Groq] Thành công với {model}")
                     return content
-                all_413 = False
             elif resp.status_code == 413:
-                print(f"⚠️ [Groq] {model} báo 413, thử model tiếp...")
+                print(f"⚠️ [Groq] {model} báo 413, thử model nhỏ hơn...")
                 continue
             elif resp.status_code == 429:
-                all_413 = False
-                print(f"⚠️ [Groq] Rate limit {model}, chờ 2s...")
-                time.sleep(2)
+                print(f"⚠️ [Groq] {model} bị rate limit, thử model tiếp...")
                 continue
             else:
-                all_413 = False
-                print(f"❌ [Groq] Lỗi {resp.status_code} với {model}")
+                print(f"❌ [Groq] Lỗi {resp.status_code}")
         except Exception as e:
-            all_413 = False
             print(f"❌ [Groq] Exception {model}: {e}")
-    if all_413:
-        raise PayloadTooLargeError()
     return None
 
-def call_gemini(prompt: str, timeout: int = 30) -> str | None:
+def call_gemini(prompt: str, timeout: int = 45) -> str | None:
     global _gemini_clients, _gemini_key_idx, _gemini_model
     if not GEMINI_API_KEYS:
         return None
@@ -628,21 +731,73 @@ def call_gemini(prompt: str, timeout: int = 30) -> str | None:
         client = _gemini_clients[_gemini_key_idx % len(_gemini_clients)]
         _gemini_key_idx += 1
     try:
-        # Bỏ timeout do lỗi extra fields
-        response = client.models.generate_content(model=_gemini_model, contents=prompt)
+        print(f"🟡 [Gemini] Bắt đầu gọi...")
+        response = client.models.generate_content(
+            model=_gemini_model,
+            contents=prompt
+        )
         if response.text and len(response.text.strip()) > 50:
+            print(f"✅ [Gemini] Thành công")
             return response.text
     except Exception as e:
         print(f"❌ [Gemini] Lỗi: {e}")
     return None
 
-def call_llm_with_fallback(prompt: str, original_chunk_count: int) -> str | None:
-    providers_after_groq = []
+def call_llm_parallel(prompt: str) -> str | None:
+    """
+    Gọi tất cả provider CÙNG LÚC.
+    Provider nào trả kết quả hợp lệ trước → dùng ngay, hủy các provider còn lại.
+    Thời gian = provider nhanh nhất thay vì tổng thời gian tất cả.
+    """
+    provider_fns = []
+    if GROQ_API_KEY:
+        provider_fns.append(("Groq", call_groq))
     if GEMINI_API_KEYS:
-        providers_after_groq.append(("Gemini", call_gemini))
-    if OPENROUTER_API_KEY:
-        providers_after_groq.append(("OpenRouter", call_openrouter))
+        provider_fns.append(("Gemini", call_gemini))
+    if OPENROUTER_API_KEY and (not FREE_ONLY_MODE or ALLOW_OPENROUTER_IN_FREE_MODE):
+        provider_fns.append(("OpenRouter", call_openrouter))
 
+    if not provider_fns:
+        return None
+
+    # Tạo executor và submit tất cả cùng lúc
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(provider_fns)) as executor:
+        future_to_name = {
+            executor.submit(fn, prompt): name
+            for name, fn in provider_fns
+        }
+
+        try:
+            for future in concurrent.futures.as_completed(
+                future_to_name.keys(), timeout=70
+            ):
+                name = future_to_name[future]
+                try:
+                    result = future.result(timeout=5)
+                    if result and len(result.strip()) > 50:
+                        print(f"🏆 [{name}] Về đích trước!")
+                        # Cancel các future còn lại (best effort)
+                        for f in future_to_name:
+                            if f is not future:
+                                f.cancel()
+                        return result
+                    else:
+                        print(f"⚠️ [{name}] Kết quả không hợp lệ, chờ provider khác...")
+                except Exception as e:
+                    print(f"❌ [{name}] Exception: {e}")
+                    continue
+
+        except concurrent.futures.TimeoutError:
+            print("⏱️ Timeout 70s — tất cả provider đều không kịp")
+
+    return None
+
+def call_llm_with_fallback(prompt: str, original_chunk_count: int) -> str | None:
+    """
+    Bước 1: Thử song song với full chunk
+    Bước 2: Nếu fail, giảm chunk 60% và thử lại song song
+    Bước 3: Nếu vẫn fail, giảm chunk 30% và thử lần cuối
+    """
     chunk_levels = [
         original_chunk_count,
         max(6, int(original_chunk_count * 0.6)),
@@ -652,61 +807,53 @@ def call_llm_with_fallback(prompt: str, original_chunk_count: int) -> str | None
     for level_idx, keep_chunks in enumerate(chunk_levels):
         if keep_chunks < original_chunk_count:
             current_prompt = reduce_prompt_chunks(prompt, keep_chunks)
-            print(f"🔄 Giảm xuống {keep_chunks} chunk (mức {level_idx + 1})")
+            print(f"🔄 Thử lại với {keep_chunks} chunk (mức {level_idx + 1}/3)")
         else:
             current_prompt = prompt
+            print(f"🚀 Gọi song song với {keep_chunks} chunk...")
 
-        groq_413 = False
-        if GROQ_API_KEY:
-            try:
-                ans = call_groq(current_prompt)
-                if ans:
-                    return ans
-                print("⚠️ [Groq] Tất cả model fail (429), chuyển provider khác...")
-            except PayloadTooLargeError:
-                groq_413 = True
-                print(f"⚠️ [Groq] Tất cả model đều 413 ở {keep_chunks} chunk")
+        result = call_llm_parallel(current_prompt)
+        if result:
+            return result
 
-        for provider_name, provider_fn in providers_after_groq:
-            try:
-                ans = provider_fn(current_prompt)
-                if ans:
-                    print(f"✅ [{provider_name}] Thành công ở mức {keep_chunks} chunk")
-                    return ans
-            except Exception as e:
-                print(f"❌ [{provider_name}] Exception: {e}")
-                continue
-
-        if not groq_413:
-            print("⚠️ Tất cả provider fail ở chunk level này, thử giảm chunk...")
+        print(f"⚠️ Tất cả provider fail ở {keep_chunks} chunk, thử mức tiếp...")
 
     return None
 
-def ask_llm(question: str, collection_name: str) -> str:
-    chunks = retrieve_with_metadata(question, collection_name)
+def ask_llm(question: str, collection_name: str, response_level: int = 3) -> str:
+    question_lc = question.lower()
+    is_list_query = any(kw in question_lc for kw in ("liệt kê", "tất cả", "bao gồm", "các loại", "những loại"))
+    is_procedure_query = any(kw in question_lc for kw in ("trình tự", "quy trình", "các bước", "thao tác"))
+
+    k_map = {1: 12, 2: 18, 3: 30}
+    k = k_map.get(response_level, 30)
+    if is_list_query:
+        k = min(40, k + 8)
+    elif is_procedure_query:
+        k = min(36, k + 4)
+
+    chunks = retrieve_with_metadata(question, collection_name, k=k)
     if not chunks:
         return "❌ Không tìm thấy thông tin liên quan trong tài liệu."
 
-    original_chunk_count = len(chunks)
-    prompt = build_prompt(question, chunks)
-    answer = call_llm_with_fallback(prompt, original_chunk_count)
+    prompt = build_prompt(question, chunks, response_level=response_level)
+
+    # Gọi song song — KHÔNG retry lần 2 (tránh gọi LLM 2 lần)
+    answer = call_llm_with_fallback(prompt, len(chunks))
 
     if not answer:
+        # Fallback cuối: trả thông tin thô từ ChromaDB
         context_summary = "\n\n".join(
             f"- {c['source']} (trang {c['page']}): {c['content'][:300]}..."
-            for c in chunks[:10]
+            for c in chunks[:5]
         )
-        return f"⚠️ Tạm thời không thể kết nối đến dịch vụ AI. Dưới đây là thông tin liên quan từ tài liệu:\n\n{context_summary}\n\nVui lòng thử lại sau."
+        return (
+            "⚠️ Tạm thời không thể kết nối AI. "
+            "Thông tin liên quan từ tài liệu:\n\n"
+            f"{context_summary}\n\nVui lòng thử lại sau vài giây."
+        )
 
-    if len(answer.split()) < 150 or "¹" not in answer:
-        enhanced_prompt = prompt + "\n\n⚠️ LƯU Ý: Câu trả lời trước thiếu chi tiết hoặc thiếu chú thích số. Hãy viết lại thật ĐẦY ĐỦ, liệt kê TẤT CẢ các mục, dùng số superscript (¹²³...) để chú thích nguồn."
-        answer2 = call_llm_with_fallback(enhanced_prompt, original_chunk_count)
-        if answer2 and len(answer2.split()) > len(answer.split()):
-            answer = answer2
-
-    # Làm sạch câu trả lời để hiển thị HTML chuyên nghiệp
-    answer = clean_answer_to_html(answer)
-    return answer
+    return clean_answer_to_html(answer)
 
 # =============================================================
 # ROUTES NGƯỜI DÙNG
@@ -781,7 +928,19 @@ def ask():
         if not data or "question" not in data or "collection_name" not in data:
             return jsonify({"answer": "Thiếu thông tin"})
 
-        answer = ask_llm(data["question"].strip(), data["collection_name"])
+        response_level = data.get("response_level", 3)
+        try:
+            response_level = int(response_level)
+        except (TypeError, ValueError):
+            response_level = 3
+        if response_level not in (1, 2, 3):
+            response_level = 3
+
+        answer = ask_llm(
+            data["question"].strip(),
+            data["collection_name"],
+            response_level=response_level
+        )
         save_question_answer(data["question"].strip(), answer, data["collection_name"])
         return jsonify({"answer": answer})
     except Exception as e:

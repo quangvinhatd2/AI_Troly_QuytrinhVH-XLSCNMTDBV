@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: ai-thuydien
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --threads 2 --timeout 180
+    healthCheckPath: /ready
+    envVars:
+      - key: FREE_ONLY_MODE
+        value: "true"
+      - key: ALLOW_OPENROUTER_IN_FREE_MODE
+        value: "false"
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+      - key: SECRET_KEY
+        sync: false
+      - key: ADMIN_PASSWORD_HASH
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
